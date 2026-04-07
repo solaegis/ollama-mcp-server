@@ -1,0 +1,111 @@
+{
+  "name": "ollama-local-llm",
+  "displayName": "Ollama Local LLM",
+  "description": "Run local LLMs via Ollama directly in VS Code and Cursor. Model picker, quick-prompt panel, send-selection commands.",
+  "version": "1.0.0",
+  "publisher": "solaegis",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/solaegis/ollama-mcp-server.git"
+  },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["AI", "Other"],
+  "keywords": ["ollama", "llm", "local", "ai", "cursor"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ollama.pickModel",
+        "title": "Ollama: Switch Model"
+      },
+      {
+        "command": "ollama.sendSelection",
+        "title": "Ollama: Send Selection to LLM"
+      },
+      {
+        "command": "ollama.rewriteSelection",
+        "title": "Ollama: Rewrite / Improve Selection"
+      },
+      {
+        "command": "ollama.openPanel",
+        "title": "Ollama: Open Chat Panel"
+      },
+      {
+        "command": "ollama.pullModel",
+        "title": "Ollama: Pull New Model"
+      }
+    ],
+    "configuration": {
+      "title": "Ollama Local LLM",
+      "properties": {
+        "ollama.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama API base URL"
+        },
+        "ollama.litellmUrl": {
+          "type": "string",
+          "default": "http://litellm.ollama-stack.orb.local:4000",
+          "description": "LiteLLM proxy URL (OrbStack hostname avoids Cursor SSRF block)"
+        },
+        "ollama.litellmKey": {
+          "type": "string",
+          "default": "sk-local-dev-key",
+          "description": "LiteLLM master key"
+        },
+        "ollama.defaultModel": {
+          "type": "string",
+          "default": "qwen2.5-coder-7b",
+          "description": "Default model — must match a model_name in config/litellm.yaml"
+        },
+        "ollama.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "ollama.sendSelection",
+          "when": "editorHasSelection",
+          "group": "ollama@1"
+        },
+        {
+          "command": "ollama.rewriteSelection",
+          "when": "editorHasSelection",
+          "group": "ollama@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "ollama.sendSelection",
+        "key": "ctrl+shift+o",
+        "mac": "cmd+shift+o",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "ollama.rewriteSelection",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "editorHasSelection"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --no-dependencies"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

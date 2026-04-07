@@ -1,0 +1,5 @@
+"""
+requirements.txt — no third-party deps needed.
+The Python backend uses only stdlib (urllib, json, sys, os).
+This file is kept for future additions (e.g. httpx for streaming).
+"""

@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: litellm
+    static_configs:
+      - targets: ["litellm:4000"]
+    metrics_path: /metrics
+    # /metrics on LiteLLM is unauthenticated by default when prometheus
+    # callback is enabled — no auth header needed unless you set
+    # require_auth_for_metrics_endpoint: true in litellm_settings

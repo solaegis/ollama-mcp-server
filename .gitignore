@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.env
+out.txt
+
+# VS Code extension build output
+vscode-extension/out/
+vscode-extension/node_modules/
+vscode-extension/*.vsix
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

@@ -1,0 +1,47 @@
+{
+  "name": "@solaegis/ollama-mcp-server",
+  "version": "1.1.0",
+  "description": "MCP server for Ollama local LLM interface",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "ollama-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "inspect": "npx @modelcontextprotocol/inspector dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "ollama",
+    "llm",
+    "model-context-protocol",
+    "ai",
+    "local-llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/solaegis/ollama-mcp-server.git"
+  },
+  "author": "Lewis Vavasour",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

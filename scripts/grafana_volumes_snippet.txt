@@ -1,0 +1,13 @@
+    restart: unless-stopped
+    networks: [ollama-net]
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../config/grafana-datasource.yaml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ../config/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    depends_on: [prometheus]

@@ -1,0 +1,378 @@
+version: "3"
+
+silent: true
+
+vars:
+  COMPOSE: docker compose -f docker/compose.yaml --env-file .env
+  REPO_DIR:
+    sh: pwd
+  OLLAMA_URL: http://localhost:11434
+  LITELLM_ORB: http://litellm.ollama-stack.orb.local:4000
+  ROUTER_ORB: http://ollama-router.ollama-stack.orb.local:4001
+
+tasks:
+  # ─── Default ──────────────────────────────────────────────────
+  default:
+    silent: true
+    desc: Show available tasks
+    cmds: [task --list]
+
+  # ─── MCP Server ───────────────────────────────────────────────
+  build:
+    silent: true
+    desc: Install deps and build TypeScript MCP server
+    cmds:
+      - npm install
+      - npm run build
+
+  inspect:
+    silent: true
+    desc: Launch MCP Inspector (browser UI for testing tools interactively)
+    deps: [build]
+    cmds:
+      - npm run inspect
+
+  dev:
+    silent: true
+    desc: Watch mode — rebuild on source changes
+    cmds:
+      - npm run dev
+
+  # ─── Docker stack ─────────────────────────────────────────────
+  up:
+    silent: true
+    desc: Start full stack (Ollama + LiteLLM + Router + WebUI + metrics)
+    cmds:
+      - cp -n .env.example .env 2>/dev/null || true
+      - "{{.COMPOSE}} up -d --remove-orphans"
+      - task: _wait-ollama
+      - task: _wait-litellm
+      - task: status
+
+  down:
+    silent: true
+    desc: Stop stack (volumes preserved)
+    cmds: ["{{.COMPOSE}} down"]
+
+  restart:
+    silent: true
+    desc: "Restart a service: task restart -- litellm"
+    cmds: ["{{.COMPOSE}} restart {{.CLI_ARGS}}"]
+
+  logs:
+    silent: true
+    desc: "Follow logs: task logs -- ollama"
+    cmds: ["{{.COMPOSE}} logs -f --tail=100 {{.CLI_ARGS}}"]
+
+  status:
+    silent: true
+    desc: Show running containers and service endpoints
+    cmds:
+      - "{{.COMPOSE}} ps"
+      - |
+        echo ""
+        echo "Endpoints (localhost):"
+        echo "  Ollama API     -> http://localhost:11434"
+        echo "  LiteLLM API    -> http://localhost:4000"
+        echo "  Smart Router   -> http://localhost:4001"
+        echo "  Chat UI        -> http://localhost:8080"
+        echo "  Grafana        -> http://localhost:3001  (login: admin / admin)"
+        echo "  Prometheus     -> http://localhost:9090"
+        echo ""
+        echo "Endpoints (OrbStack — use these in Cursor/IDE to avoid SSRF blocks):"
+        echo "  LiteLLM API    -> {{.LITELLM_ORB}}/v1"
+        echo "  Smart Router   -> {{.ROUTER_ORB}}/v1"
+
+  grafana:
+    silent: true
+    desc: Open Grafana in the browser
+    cmds:
+      - open http://localhost:3001
+
+  reset:
+    silent: true
+    desc: "Stop stack AND delete all volumes (destructive)"
+    prompt: "Delete all model data and volumes? This cannot be undone."
+    cmds: ["{{.COMPOSE}} down -v"]
+
+  # ─── OrbStack hostname check ──────────────────────────────────
+  orb-check:
+    silent: true
+    desc: Verify OrbStack hostnames and container status
+    cmds:
+      - |
+        echo "=== LiteLLM ==="
+        if curl -sf --max-time 3 {{.LITELLM_ORB}}/health/liveliness >/dev/null 2>&1; then
+          echo "OK  -> {{.LITELLM_ORB}}/v1  (configured in Cursor)"
+        else
+          echo "FAIL -> run: task up"
+        fi
+        echo ""
+        echo "=== Router container ==="
+        docker inspect ollama-router --format "  status={{.State.Status}} healthy={{.State.Health.Status}}" 2>/dev/null || echo "  not found - run: task up"
+        echo ""
+        echo "=== Router hostname variants ==="
+        for host in "ollama-router.ollama-stack.orb.local" "router.ollama-stack.orb.local" "ollama-router.orb.local"; do
+          if curl -sf --max-time 2 "http://${host}:4001/health" >/dev/null 2>&1; then
+            echo "  OK  -> http://${host}:4001"
+          else
+            echo "  --     http://${host}:4001"
+          fi
+        done
+        echo ""
+        echo "=== Localhost (task router-test uses this) ==="
+        if curl -sf --max-time 2 "http://localhost:4001/health" >/dev/null 2>&1; then
+          echo "  OK  -> http://localhost:4001"
+        else
+          echo "  FAIL -> try: task restart -- router"
+        fi
+
+  # ─── Model management ─────────────────────────────────────────
+  pull:
+    silent: true
+    desc: "Pull a model: task pull -- gemma4:latest"
+    cmds:
+      - |
+        MODEL="{{.CLI_ARGS}}"
+        if [ -z "$MODEL" ]; then
+          echo "Usage: task pull -- <model>"
+          echo "Browse models: https://ollama.com/library"
+          exit 1
+        fi
+        if ! curl -sf {{.OLLAMA_URL}}/api/tags >/dev/null 2>&1; then
+          echo "ERROR: Ollama not reachable at {{.OLLAMA_URL}}"
+          echo "Run 'task up' first"
+          exit 1
+        fi
+        echo "Pulling $MODEL (this may take a while)..."
+        curl -f {{.OLLAMA_URL}}/api/pull \
+          -H "Content-Type: application/json" \
+          -d "{\"name\":\"$MODEL\"}" \
+          --no-buffer \
+          | grep -o '"status":"[^"]*"' \
+          | sed 's/"status":"//;s/"//' \
+          | uniq
+        echo "Done: $MODEL"
+
+  list:
+    silent: true
+    desc: List all locally available models
+    cmds:
+      - |
+        if ! curl -sf {{.OLLAMA_URL}}/api/tags >/dev/null 2>&1; then
+          echo "ERROR: Ollama not reachable at {{.OLLAMA_URL}} — run 'task up' first"
+          exit 1
+        fi
+        curl -sf {{.OLLAMA_URL}}/api/tags \
+          | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin)
+        models = data.get('models', [])
+        if not models:
+            print('No models pulled yet. Run: task pull -- <model>')
+        else:
+            print(f\"{'NAME':<45} {'PARAMS':<10} SIZE\")
+            print('-' * 65)
+            for m in models:
+                name = m['name']
+                params = m.get('details', {}).get('parameter_size', '?')
+                size = f\"{m['size'] / 1e9:.1f} GB\"
+                print(f'{name:<45} {params:<10} {size}')
+        "
+
+  ps:
+    silent: true
+    desc: Show models currently loaded in memory
+    cmds:
+      - |
+        if ! curl -sf {{.OLLAMA_URL}}/api/tags >/dev/null 2>&1; then
+          echo "ERROR: Ollama not reachable at {{.OLLAMA_URL}} — run 'task up' first"
+          exit 1
+        fi
+        curl -sf {{.OLLAMA_URL}}/api/ps \
+          | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin)
+        models = data.get('models', [])
+        if not models:
+            print('No models currently loaded in memory')
+        else:
+            print(f\"{'NAME':<45} VRAM\")
+            print('-' * 55)
+            for m in models:
+                name = m['name']
+                vram = f\"{m.get('size_vram', 0) / 1e9:.1f} GB\"
+                print(f'{name:<45} {vram}')
+        "
+
+  rm-model:
+    silent: true
+    desc: "Delete a local model: task rm-model -- phi4:latest"
+    cmds:
+      - |
+        MODEL="{{.CLI_ARGS}}"
+        if [ -z "$MODEL" ]; then
+          echo "Usage: task rm-model -- <model>"
+          exit 1
+        fi
+        curl -sf -X DELETE {{.OLLAMA_URL}}/api/delete \
+          -H "Content-Type: application/json" \
+          -d "{\"name\":\"$MODEL\"}" \
+          && echo "Deleted: $MODEL" \
+          || echo "ERROR: could not delete $MODEL (not found or Ollama unreachable)"
+
+  # ─── Smart router ─────────────────────────────────────────────
+  router-test:
+    silent: true
+    desc: "Test routing for a prompt: task router-test -- write a patent memo"
+    cmds:
+      - python3 scripts/router_test.py {{.CLI_ARGS}}
+
+  router-models:
+    silent: true
+    desc: Show the full routing table
+    cmds:
+      - python3 scripts/router_models.py
+
+  router-dev:
+    silent: true
+    desc: Run the smart router locally (outside Docker) for development
+    cmds:
+      - pip install -q -r router/requirements.txt
+      - |
+        LITELLM_BASE_URL=http://localhost:4000 \
+        LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-dev-key} \
+        uvicorn router.server:app --port 4001 --reload
+
+  # ─── VS Code extension ────────────────────────────────────────
+  ext-install:
+    silent: true
+    desc: Build, package, and install the extension into Cursor
+    dir: vscode-extension
+    cmds:
+      - npm install
+      - npm run compile
+      - npm install -g @vscode/vsce 2>/dev/null || true
+      - vsce package --no-dependencies
+      - |
+        VSIX=$(ls -t ollama-local-llm-*.vsix 2>/dev/null | head -1)
+        if [ -z "$VSIX" ]; then
+          echo "ERROR: no .vsix found after packaging"
+          exit 1
+        fi
+        cursor --install-extension "$VSIX"
+        echo "Installed $VSIX into Cursor"
+
+  ext-package:
+    silent: true
+    desc: Package extension as .vsix only (no install)
+    dir: vscode-extension
+    cmds:
+      - npm install
+      - npm run compile
+      - npm install -g @vscode/vsce 2>/dev/null || true
+      - vsce package --no-dependencies
+
+  ext-dev:
+    silent: true
+    desc: Watch mode for extension TypeScript
+    dir: vscode-extension
+    cmds:
+      - npm run watch
+
+  # ─── Quick tests ──────────────────────────────────────────────
+  test-ollama:
+    silent: true
+    desc: Smoke-test direct Ollama connection
+    cmds:
+      - task: list
+
+  test-litellm:
+    silent: true
+    desc: Smoke-test LiteLLM OpenAI-compatible endpoint
+    cmds:
+      - python3 scripts/test_litellm.py
+
+  # ─── Setup helpers ────────────────────────────────────────────
+  setup-cursor:
+    silent: true
+    desc: Write MCP + OpenAI provider config to Cursor settings
+    cmds:
+      - |
+        python3 -c "
+        import json, pathlib
+        dist = '{{.REPO_DIR}}/dist/index.js'
+        mcp_path = pathlib.Path.home() / '.cursor' / 'mcp.json'
+        mcp_path.parent.mkdir(parents=True, exist_ok=True)
+        mcp = json.loads(mcp_path.read_text()) if mcp_path.exists() else {}
+        mcp.setdefault('mcpServers', {})['ollama'] = {
+          'command': 'node',
+          'args': [dist],
+          'env': {'OLLAMA_BASE_URL': 'http://localhost:11434'}
+        }
+        mcp_path.write_text(json.dumps(mcp, indent=2))
+        print('MCP written:', mcp_path)
+        settings_path = pathlib.Path.home() / 'Library' / 'Application Support' / 'Cursor' / 'User' / 'settings.json'
+        settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+        settings['cursor.openai.apiKey'] = 'sk-local-dev-key'
+        settings['cursor.openai.apiBase'] = 'http://ollama-router.ollama-stack.orb.local:4001/v1'
+        settings_path.write_text(json.dumps(settings, indent=4))
+        print('Cursor settings written:', settings_path)
+        "
+
+  setup-claude-desktop:
+    silent: true
+    desc: Write MCP config to Claude Desktop config
+    cmds:
+      - |
+        python3 -c "
+        import json, pathlib
+        dist = '{{.REPO_DIR}}/dist/index.js'
+        cfg_path = pathlib.Path.home() / 'Library' / 'Application Support' / 'Claude' / 'claude_desktop_config.json'
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+        cfg.setdefault('mcpServers', {})['ollama'] = {
+          'command': 'node',
+          'args': [dist],
+          'env': {'OLLAMA_BASE_URL': 'http://localhost:11434'}
+        }
+        cfg_path.write_text(json.dumps(cfg, indent=2))
+        print('Written:', cfg_path)
+        print('Restart Claude Desktop to pick up changes.')
+        "
+
+  # ─── Internal ─────────────────────────────────────────────────
+  _wait-ollama:
+    silent: true
+    internal: true
+    cmds:
+      - |
+        echo "Waiting for Ollama..."
+        for i in $(seq 1 30); do
+          if curl -sf {{.OLLAMA_URL}}/api/tags >/dev/null 2>&1; then
+            echo "Ollama ready"
+            exit 0
+          fi
+          echo "  attempt $i/30..."
+          sleep 3
+        done
+        echo "ERROR: Ollama did not become ready after 90s"
+        docker logs ollama --tail 20
+        exit 1
+
+  _wait-litellm:
+    silent: true
+    internal: true
+    cmds:
+      - |
+        echo "Waiting for LiteLLM (can take 2-3 min on first start)..."
+        for i in $(seq 1 60); do
+          if curl -sf http://localhost:4000/health/liveliness >/dev/null 2>&1; then
+            echo "LiteLLM ready"
+            exit 0
+          fi
+          echo "  attempt $i/60..."
+          sleep 5
+        done
+        echo "WARNING: LiteLLM not ready after 5 min — check logs with: task logs -- litellm"
+        exit 0

@@ -1,0 +1,80 @@
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 600
+  num_retries: 2
+  # Enable Prometheus metrics — exposes /metrics endpoint on port 4000
+  callbacks: ["prometheus"]
+
+model_list:
+  # ── Code-focused ──────────────────────────────────────────────
+  - model_name: qwen2.5-coder-7b
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: qwen2.5-coder-14b
+    litellm_params:
+      model: ollama/qwen2.5-coder:14b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: deepseek-coder-v2
+    litellm_params:
+      model: ollama/deepseek-coder-v2:16b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  # ── General reasoning ─────────────────────────────────────────
+  - model_name: phi4
+    litellm_params:
+      model: ollama/phi4:latest
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: llama3.3-70b
+    litellm_params:
+      model: ollama/llama3.3:70b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  # ── Gemma 4 ───────────────────────────────────────────────────
+  - model_name: gemma4
+    litellm_params:
+      model: ollama/gemma4:latest
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: gemma4-27b
+    litellm_params:
+      model: ollama/gemma4:27b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  # ── OpenAI drop-in aliases ────────────────────────────────────
+  - model_name: gpt-4o
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: ollama/phi4:latest
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: commit
+    litellm_params:
+      model: ollama/qwen2.5-coder:14b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: commit-sage
+    litellm_params:
+      model: ollama/qwen2.5-coder:14b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  # ── Embeddings ────────────────────────────────────────────────
+  - model_name: text-embedding-3-small
+    litellm_params:
+      model: ollama/nomic-embed-text
+      api_base: os.environ/OLLAMA_BASE_URL
