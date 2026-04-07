@@ -252,8 +252,7 @@ tasks:
     cmds:
       - npm install
       - npm run compile
-      - npm install -g @vscode/vsce 2>/dev/null || true
-      - vsce package --no-dependencies
+      - npm run package
       - |
         VSIX=$(ls -t ollama-local-llm-*.vsix 2>/dev/null | head -1)
         if [ -z "$VSIX" ]; then
@@ -270,8 +269,7 @@ tasks:
     cmds:
       - npm install
       - npm run compile
-      - npm install -g @vscode/vsce 2>/dev/null || true
-      - vsce package --no-dependencies
+      - npm run package
 
   ext-dev:
     silent: true
