@@ -118,7 +118,8 @@ export const EmbeddingSchema = z.object({
 
 export const TaskSchema = z.object({
   task: z.string().describe(
-    'The task description in plain English. The router selects the best local model automatically based on content (Rust/code → qwen2.5-coder, architecture → gemma4, docs/prose → llama3.3, quick Q&A → gemma4).'
+    'The task description in plain English. The router selects the best local model automatically based on content ' +
+      '(Rust/code → qwen2.5-coder-14b, summarization → gemma4-27b, architecture → gemma4-27b, docs/prose → llama3.3-70b, quick Q&A → gemma4, general code → qwen2.5-coder-7b).'
   ),
   context: z.string().optional().describe(
     'Optional additional context, e.g. relevant code, file contents, or background information to include.'
@@ -143,7 +144,8 @@ export const GitCommitSchema = z.object({
 export const SummarizeSchema = z.object({
   content: z.string().describe('The text, code, or document to summarize.'),
   goal: z.string().optional().describe(
-    'What the summary is for, e.g. "a PR description", "a changelog entry", "a standup update".'
+    'What the summary is for, e.g. "a PR description", "a changelog entry", "a standup update". ' +
+      'Routing uses model auto → gemma4-27b for long-context summarization.'
   ),
 });
 

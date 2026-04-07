@@ -34,8 +34,9 @@ const tools: Tool[] = [
     name: 'ollama_task',
     description:
       'Delegate a task to a local LLM. The smart router automatically selects the best model ' +
-      'based on task content: Rust/code → qwen2.5-coder-14b, architecture/design → gemma4, ' +
-      'docs/prose/patents → llama3.3-70b, quick Q&A → gemma4, general code → qwen2.5-coder-7b. ' +
+      'based on task content: Rust/code → qwen2.5-coder-14b, summarization/recap/PR text → gemma4-27b, ' +
+      'architecture/design → gemma4-27b, docs/prose/patents → llama3.3-70b, quick Q&A → gemma4, ' +
+      'general code → qwen2.5-coder-7b. ' +
       'Use this instead of ollama_chat/ollama_generate whenever possible to save Claude tokens. ' +
       'Provide the full task description and any relevant context in the inputs.',
     inputSchema: {
@@ -88,8 +89,8 @@ const tools: Tool[] = [
   {
     name: 'ollama_summarize',
     description:
-      'Summarize text, code, or a document using a local LLM. ' +
-      'Good for: PR descriptions, changelog entries, standup updates, doc summaries. ' +
+      'Summarize text, code, or a document using a local LLM. Uses model auto → summarization → gemma4-27b ' +
+      '(long context). Good for: PR descriptions, changelog entries, standup updates, doc summaries. ' +
       'Saves Claude tokens on large summarization tasks.',
     inputSchema: {
       type: 'object',

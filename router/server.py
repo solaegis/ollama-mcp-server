@@ -7,9 +7,10 @@ or just use the /v1/chat/completions passthrough which auto-selects the model.
 
 Endpoints:
   POST /v1/chat/completions   OpenAI-compatible. Auto-routes then proxies to LiteLLM.
+  GET  /v1/models             OpenAI model list (proxied from LiteLLM; used by Cursor discovery).
   POST /route                 Classification only — returns model + reason, no LLM call.
   GET  /health                Health check.
-  GET  /models                List available models and their routing triggers.
+  GET  /models                Router routing table (not OpenAI format).
 
 Run:
   uvicorn router.server:app --port 4001 --reload
@@ -20,15 +21,15 @@ Or via task:
 
 from __future__ import annotations
 
-import os
 import json
-import urllib.request
+import os
 import urllib.error
+import urllib.request
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from .classifier import route, ROUTES
+from .classifier import ROUTES, route
 
 LITELLM_URL = os.environ.get("LITELLM_BASE_URL", "http://localhost:4000")
 LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "sk-local-dev-key")
@@ -41,24 +42,60 @@ app = FastAPI(title="Ollama Smart Router", version="1.0.0")
 
 # ─── Health ───────────────────────────────────────────────────────────────
 
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "litellm": LITELLM_URL}
 
 
-# ─── Model map ────────────────────────────────────────────────────────────
+# ─── OpenAI-compatible model list (for Cursor / clients that call GET /v1/models) ─
+
+
+@app.get("/v1/models")
+def openai_models_list() -> Response:
+    """Proxy LiteLLM's /v1/models so clients using this base URL can discover model IDs."""
+    req = urllib.request.Request(
+        f"{LITELLM_URL}/v1/models",
+        headers={"Authorization": f"Bearer {LITELLM_KEY}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            content = resp.read()
+            headers = dict(resp.headers)
+            return Response(
+                content=content,
+                status_code=resp.status,
+                media_type=headers.get("Content-Type", "application/json"),
+                headers={
+                    k: v
+                    for k, v in headers.items()
+                    if k.lower() not in ("transfer-encoding", "connection")
+                },
+            )
+    except urllib.error.HTTPError as e:
+        return Response(content=e.read(), status_code=e.code, media_type="application/json")
+    except urllib.error.URLError as e:
+        return JSONResponse(
+            {"error": f"Cannot reach LiteLLM at {LITELLM_URL}: {e.reason}"},
+            status_code=502,
+        )
+
+
+# ─── Model map (router-specific) ───────────────────────────────────────────
+
 
 @app.get("/models")
 def models() -> dict:
     return {
         "routing_table": {
-            name: {"model": r.model, "triggers": r.reason}
-            for name, r in ROUTES.items()
+            name: {"model": r.model, "triggers": r.reason} for name, r in ROUTES.items()
         }
     }
 
 
 # ─── Classify only ────────────────────────────────────────────────────────
+
 
 @app.post("/route")
 async def classify_only(request: Request) -> JSONResponse:
@@ -70,6 +107,7 @@ async def classify_only(request: Request) -> JSONResponse:
 
 
 # ─── Main proxy ───────────────────────────────────────────────────────────
+
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Response:
@@ -144,12 +182,14 @@ async def chat_completions(request: Request) -> Response:
                 content=content,
                 status_code=resp.status,
                 media_type=headers.get("Content-Type", "application/json"),
-                headers={k: v for k, v in headers.items()
-                         if k.lower() not in ("transfer-encoding", "connection")},
+                headers={
+                    k: v
+                    for k, v in headers.items()
+                    if k.lower() not in ("transfer-encoding", "connection")
+                },
             )
     except urllib.error.HTTPError as e:
-        return Response(content=e.read(), status_code=e.code,
-                        media_type="application/json")
+        return Response(content=e.read(), status_code=e.code, media_type="application/json")
     except urllib.error.URLError as e:
         return JSONResponse(
             {"error": f"Cannot reach LiteLLM at {LITELLM_URL}: {e.reason}"},

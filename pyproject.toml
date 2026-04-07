@@ -1,0 +1,39 @@
+[project]
+name = "ollama-mcp-server-workspace"
+version = "0.0.0"
+description = "Meta config for Python tooling (router + tests); not a published package."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pyyaml>=6.0",
+    "ruff>=0.8.0",
+    "httpx>=0.27.0",
+    "pre-commit>=3.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["router", "tests"]
+extend-exclude = [
+    "scripts",
+    "vscode-extension",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

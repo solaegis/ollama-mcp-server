@@ -7,6 +7,7 @@ are YAML special characters and cause parse failures in model_name fields).
 
 Model assignments (tuned for Nuvent / Rust / IaC workloads):
   git_commit     → qwen2.5-coder-14b   Diffs, conventional commits, Commit Sage
+  summarization  → gemma4-27b           Long-context summaries, PRs, changelogs
   rust_code      → qwen2.5-coder-14b   Best Rust on Polyglot benchmark
   general_code   → qwen2.5-coder-7b    Fast, good enough for completions
   architecture   → gemma4-27b           256K context, strong reasoning
@@ -18,12 +19,12 @@ Model assignments (tuned for Nuvent / Rust / IaC workloads):
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
-
 
 # ─── Model routing table ──────────────────────────────────────────────────
 # Names must match model_name entries in config/litellm.yaml exactly.
+
 
 @dataclass(frozen=True)
 class Route:
@@ -37,6 +38,11 @@ ROUTES: dict[str, Route] = {
         "git_commit",
         "qwen2.5-coder-14b",
         "Git commit message, diff, or conventional commit",
+    ),
+    "summarization": Route(
+        "summarization",
+        "gemma4-27b",
+        "Summarization, recap, PR/changelog/standup text",
     ),
     "rust_code": Route(
         "rust_code",
@@ -74,6 +80,8 @@ ROUTES: dict[str, Route] = {
 # ─── Keyword signals ──────────────────────────────────────────────────────
 # Commit-style prompts are checked first so a Rust-heavy diff still routes to
 # git_commit (commit message) rather than rust_code (implementation).
+# Summarization is checked next so "summarize this Rust code" prefers long-context
+# gemma4-27b over rust_code.
 
 COMMIT_SIGNALS = re.compile(
     r"(diff\s+--git|git\s+diff\b|^\s*@@\s|^\+\+\+\s+[ab]/|^---\s+[ab]/|^\s*index\s+[0-9a-f]{7,}\b|"
@@ -82,6 +90,14 @@ COMMIT_SIGNALS = re.compile(
     r"\bgenerate\s+(a\s+)?commit\b|\bwrite\s+(a\s+)?commit\b|"
     r"\bsuggest\s+(a\s+)?commit\b)",
     re.IGNORECASE | re.MULTILINE,
+)
+
+SUMMARIZE_SIGNALS = re.compile(
+    r"\b(summarize\s+(the\s+)?(following|this|below)|\bsummary\b|tl;dr|tldr|"
+    r"high.level\s+overview|executive\s+summary|recap\b|"
+    r"pr\s+description|changelog\s+entry|standup\s+update|release\s+notes|"
+    r"summarize\s+for)\b",
+    re.IGNORECASE,
 )
 
 RUST_SIGNALS = re.compile(
@@ -126,6 +142,7 @@ QA_SIGNALS = re.compile(
 
 # ─── Classifier ───────────────────────────────────────────────────────────
 
+
 def extract_text(messages: Sequence[dict]) -> str:
     parts = []
     for m in messages:
@@ -139,6 +156,8 @@ def classify(messages: Sequence[dict]) -> Route:
 
     if COMMIT_SIGNALS.search(text):
         return ROUTES["git_commit"]
+    if SUMMARIZE_SIGNALS.search(text):
+        return ROUTES["summarization"]
     if RUST_SIGNALS.search(text):
         return ROUTES["rust_code"]
     if ARCH_SIGNALS.search(text):

@@ -238,11 +238,11 @@ tasks:
     silent: true
     desc: Run the smart router locally (outside Docker) for development
     cmds:
-      - pip install -q -r router/requirements.txt
+      - uv sync --group dev
       - |
         LITELLM_BASE_URL=http://localhost:4000 \
         LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-dev-key} \
-        uvicorn router.server:app --port 4001 --reload
+        uv run uvicorn router.server:app --port 4001 --reload
 
   # ─── VS Code extension ────────────────────────────────────────
   ext-install:
@@ -279,6 +279,17 @@ tasks:
     dir: vscode-extension
     cmds:
       - npm run watch
+
+  # ─── Automated tests (no Ollama required) ───────────────────
+  test:
+    silent: true
+    desc: Run ruff + pytest + npm build (uv sync --group dev)
+    cmds:
+      - uv sync --group dev
+      - uv run ruff check router tests
+      - uv run ruff format --check router tests
+      - uv run pytest tests/ -q
+      - task: build
 
   # ─── Quick tests ──────────────────────────────────────────────
   test-ollama:
@@ -319,6 +330,12 @@ tasks:
         settings_path.write_text(json.dumps(settings, indent=4))
         print('Cursor settings written:', settings_path)
         "
+
+  sync-cursor-models:
+    silent: true
+    desc: Write ~/.cursor/ollama-router-model-list.json and probe GET /v1/models (Cursor discovers models via API)
+    cmds:
+      - uv run python scripts/sync_cursor_models.py
 
   setup-claude-desktop:
     silent: true

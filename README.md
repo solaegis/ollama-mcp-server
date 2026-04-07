@@ -74,6 +74,21 @@ task setup-claude-desktop
 
 ---
 
+## Choosing an agent (or provider)
+
+Cursor and other clients can use **several** “agents” or backends at once. Use this as a rule of thumb:
+
+| Use this | When |
+|---|---|
+| **Cursor cloud / subscription models** (default Chat, Composer, etc.) | Hard problems: architecture, large refactors, debugging across many files, planning, or when you need the strongest available model. |
+| **MCP tools** (`ollama_task`, `ollama_summarize`, `ollama_git_commit`, …) | Offload **repetitive or token-heavy** work to **local** models: conventional commits from diffs, long summaries, embeddings, quick local checks. Saves **context and cost** on the cloud agent; the **smart router** picks a model from prompt content when the tool uses `model: auto`. Prefer these tools in the **agent** chat when the task does not need frontier reasoning. |
+| **OpenAI-compatible override → smart router** (`http://localhost:4001/v1`, model `auto` or a LiteLLM alias) | **Local** Chat sessions that should follow the same **routing** as MCP (code vs docs vs summarization, etc.). Use **Verify** so `GET /v1/models` populates the list. Not every Composer surface respects custom providers—if in doubt, use **Chat** or **MCP** for local routing. |
+| **VS Code / Cursor extension** (`Ollama: …` commands) | **Editor-native** flows: send selection, rewrite selection, side chat panel, model picker. Calls **Ollama directly** by default (not the smart router) unless you point integration at LiteLLM/router yourself. |
+
+**Practical split:** keep **cloud** for the work only a strong model should do; push **commits, summaries, and bulk local inference** to MCP or the local router so your main agent’s context stays focused on coding and design.
+
+---
+
 ## Model management
 
 ```bash
@@ -120,10 +135,11 @@ All four can be loaded simultaneously on the M2 Ultra.
 
 For the **OpenAI-compatible provider** (Cursor chat/composer using local models), point at the **smart router** (port **4001**) so requests can be classified (code vs docs vs **git commit**, etc.):
 
-Cursor Settings → Models → Add Model (or `cursor.openai.apiBase` / `cursor.openai.apiKey` in `settings.json`):
-- API Base: `http://localhost:4001/v1` (or `http://ollama-router.ollama-stack.orb.local:4001/v1` when using OrbStack hostnames from `task setup-cursor`)
+Cursor Settings → Models → OpenAI override (or `cursor.openai.apiBase` / `cursor.openai.apiKey` in `settings.json`):
+- API Base: `http://localhost:4001/v1` (or `http://ollama-router.ollama-stack.orb.local:4001/v1` when using OrbStack hostnames from `task setup-cursor`). The router proxies **`GET /v1/models`** to LiteLLM so Cursor can **discover** model IDs (use **Verify** if the list is empty).
 - API Key: `sk-local-dev-key` (same as `LITELLM_MASTER_KEY` in `.env`)
 - Model: `auto` or `router` for automatic routing; or `commit` / `commit-sage` to force the git-commit model; or any `model_name` from `config/litellm.yaml` (e.g. `qwen2.5-coder-7b`) for a fixed model.
+- `task sync-cursor-models` writes a reference list under `~/.cursor/ollama-router-model-list.json` and checks `GET /v1/models`; it does **not** populate Cursor’s Settings UI (Cursor reads models from the API, not arbitrary `settings.json` keys).
 
 **Commit Sage** (VS Code / Cursor extension `VizzleTF.geminicommit`): set provider to **OpenAI**, **Base URL** `http://localhost:4001/v1`, API key as above, and keep default model **`gpt-3.5-turbo`** — the router upgrades to **`qwen2.5-coder-14b`** when the prompt looks like a diff/commit. To force the commit model without classification, set model to **`commit`** or **`commit-sage`**.
 

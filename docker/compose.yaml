@@ -69,10 +69,13 @@ services:
       - "4001:4001"
     volumes:
       - ../router:/app/router:ro
+      - ../pyproject.toml:/app/pyproject.toml:ro
+      - ../uv.lock:/app/uv.lock:ro
     working_dir: /app
     command: >
-      sh -c "pip install -q fastapi uvicorn[standard] &&
-             uvicorn router.server:app --host 0.0.0.0 --port 4001"
+      sh -c "pip install -q uv &&
+             uv sync --frozen --no-dev &&
+             uv run uvicorn router.server:app --host 0.0.0.0 --port 4001"
     environment:
       - LITELLM_BASE_URL=http://litellm:4000
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-dev-key}
@@ -110,7 +113,7 @@ services:
     restart: "no"
     networks: [ollama-net]
     environment:
-      - MODELS=${DEFAULT_MODELS:-qwen2.5-coder:7b,nomic-embed-text:latest}
+      - MODELS=${DEFAULT_MODELS:-qwen2.5-coder:7b,nomic-embed-text:latest,gemma4:latest,gemma4:27b}
     depends_on:
       ollama:
         condition: service_healthy

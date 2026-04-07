@@ -11,6 +11,9 @@ vscode-extension/node_modules/
 vscode-extension/*.vsix
 
 # Python
+.venv/
+.pytest_cache/
+.ruff_cache/
 __pycache__/
 *.pyc
 *.pyo

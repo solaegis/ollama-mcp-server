@@ -1,0 +1,33 @@
+# Install: uv sync --group dev && uv run pre-commit install
+# Run manually: uv run pre-commit run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+        files: ^(router|tests)/
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+        files: ^(router|tests)/
+
+      - id: pytest-router
+        name: pytest (router + config contract)
+        entry: uv run pytest tests/
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: npm-build
+        name: npm run build (MCP server)
+        entry: bash -c 'npm run build'
+        language: system
+        pass_filenames: false
+        files: ^(src/.*|package\.json|package-lock\.json|tsconfig\.json)$

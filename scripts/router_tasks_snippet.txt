@@ -26,9 +26,9 @@
     desc: Run the smart router locally (outside Docker) for development
     dir: "{{.REPO_DIR}}"
     cmds:
-      - pip install -q -r router/requirements.txt
+      - uv sync --group dev
       - |
         LITELLM_BASE_URL=http://localhost:4000 \
         LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-dev-key} \
-        uvicorn router.server:app --port 4001 --reload
+        uv run uvicorn router.server:app --port 4001 --reload
 
