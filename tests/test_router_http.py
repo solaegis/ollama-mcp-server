@@ -133,3 +133,29 @@ def test_chat_completions_http_error(mock_urlopen: MagicMock) -> None:
         json={"model": "auto", "messages": [{"role": "user", "content": "hi"}]},
     )
     assert r.status_code == 500
+
+
+@patch("router.server.urllib.request.urlopen")
+def test_chat_completions_explicit_ollama_model_passes_through(mock_urlopen: MagicMock) -> None:
+    mock_urlopen.return_value = _mock_urlopen_response(
+        {
+            "id": "chatcmpl-test",
+            "model": "phi4:latest",
+            "choices": [
+                {"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"},
+            ],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+        }
+    )
+    r = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "phi4:latest",
+            "messages": [{"role": "user", "content": "Say hello in one word."}],
+        },
+    )
+    assert r.status_code == 200
+    mock_urlopen.assert_called_once()
+    call_args = mock_urlopen.call_args[0][0]
+    sent = json.loads(call_args.data.decode())
+    assert sent["model"] == "phi4:latest"

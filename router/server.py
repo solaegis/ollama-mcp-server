@@ -8,6 +8,12 @@ or just use the /v1/chat/completions passthrough which auto-selects the model.
 Requests are forwarded directly to Ollama's OpenAI-compatible API
 (/v1/chat/completions).
 
+Streaming note: each request reads the full upstream HTTP body before returning
+it to the client (no incremental SSE chunking at the socket level). Clients still
+receive a valid streamed body when Ollama uses SSE; first-byte latency differs
+from a direct Ollama connection. Prometheus token counters from ``usage`` only
+run for non-streaming ``application/json`` responses (see _record_chat_metrics).
+
 Endpoints:
   POST /v1/chat/completions   OpenAI-compatible. Auto-routes then proxies to Ollama.
   GET  /v1/models             Synthetic OpenAI model list (used by Cursor discovery).
@@ -42,17 +48,6 @@ OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # Force git-commit model without classifier.
 FORCE_COMMIT_MODEL_IDS = frozenset({"commit", "commit-sage", "git-commit"})
-
-# Map OpenAI-compatible model names to Ollama native names.
-# These are aliases Cursor and other OpenAI clients send when configured
-# to use this router as a drop-in OpenAI provider.
-OPENAI_ALIAS_MAP: dict[str, str] = {
-    "gpt-4o": "qwen2.5-coder:7b",
-    "gpt-4": "qwen2.5-coder:14b",
-    "gpt-4o-mini": "phi4:latest",
-    "gpt-3.5-turbo": "qwen2.5-coder:7b",
-    "text-davinci-003": "qwen2.5-coder:7b",
-}
 
 app = FastAPI(title="Ollama Smart Router", version="1.0.0")
 
@@ -96,8 +91,8 @@ def openai_models_list() -> JSONResponse:
     """Return a synthetic OpenAI-compatible model list.
 
     Cursor and other OpenAI-compatible clients call GET /v1/models to discover
-    available model IDs. We build this list from ROUTES (Ollama native names),
-    OPENAI_ALIAS_MAP, and router shortcuts — no outbound HTTP call needed.
+    available model IDs. We build this list from ROUTES (Ollama native names)
+    and router shortcuts — no outbound HTTP call needed.
     """
     seen: set[str] = set()
     model_ids: list[str] = []
@@ -111,11 +106,6 @@ def openai_models_list() -> JSONResponse:
         if r.model not in seen:
             seen.add(r.model)
             model_ids.append(r.model)
-
-    for alias in OPENAI_ALIAS_MAP:
-        if alias not in seen:
-            seen.add(alias)
-            model_ids.append(alias)
 
     now = int(time.time())
     data = [
@@ -158,9 +148,9 @@ async def chat_completions(request: Request) -> Response:
 
     If the client sends model="auto", the router picks the model.
     Models "commit", "commit-sage", "git-commit" force the git_commit model.
-    OpenAI alias names (gpt-4o, gpt-3.5-turbo, etc.) are translated to Ollama
-    native model names via OPENAI_ALIAS_MAP. Any other explicit model name is
-    passed through unchanged.
+    Any other explicit ``model`` string is forwarded to Ollama unchanged (must be
+    a valid Ollama model id, e.g. ``phi4:latest``). This stack does not map
+    vendor cloud model names.
     """
     body = await request.json()
     messages = body.get("messages", [])
@@ -178,14 +168,13 @@ async def chat_completions(request: Request) -> Response:
         body["model"] = model
         routed = True
     else:
-        translated = OPENAI_ALIAS_MAP.get(requested_model, requested_model)
-        body["model"] = translated
-        model = translated
-        reason = "alias" if translated != requested_model else "explicit"
-        route_key = "alias" if translated != requested_model else "explicit"
-        routed = translated != requested_model
+        model = requested_model
+        body["model"] = requested_model
+        reason = "explicit"
+        route_key = "explicit"
+        routed = False
 
-    # Forward to Ollama
+    # Forward to Ollama (300s matches long generations; see urllib.request.urlopen timeout=)
     payload = json.dumps(body).encode()
     req = urllib.request.Request(
         f"{OLLAMA_URL}/v1/chat/completions",
@@ -246,9 +235,16 @@ async def chat_completions(request: Request) -> Response:
                 },
             )
     except urllib.error.HTTPError as e:
-        return Response(content=e.read(), status_code=e.code, media_type="application/json")
+        err_body = e.read()
+        default_ct = "application/json"
+        if e.headers:
+            ctype = e.headers.get("Content-Type", default_ct)
+        else:
+            ctype = default_ct
+        return Response(content=err_body, status_code=e.code, media_type=ctype)
     except urllib.error.URLError as e:
+        hint = "Ensure Ollama is running (native: ollama serve) and OLLAMA_BASE_URL points to it."
         return JSONResponse(
-            {"error": f"Cannot reach Ollama at {OLLAMA_URL}: {e.reason}"},
+            {"error": f"Cannot reach Ollama at {OLLAMA_URL}: {e.reason}. {hint}"},
             status_code=502,
         )

@@ -4,6 +4,8 @@ router/classifier.py — Smart model router for the ollama-mcp-server stack.
 Classifies an incoming chat request and returns the best local model for it.
 Uses Ollama native model names (with colons, e.g. "qwen2.5-coder:14b") which
 are passed directly to Ollama's OpenAI-compatible API at /v1/chat/completions.
+Misclassification sends traffic to a suboptimal model (quality/latency); use
+POST /route on the router to debug routing without invoking the LLM.
 
 Model assignments (aligned with typical pulled sets: qwen2.5-coder, deepseek-coder, phi4, gemma4):
   git_commit     → qwen2.5-coder:14b   Diffs, conventional commits, Commit Sage

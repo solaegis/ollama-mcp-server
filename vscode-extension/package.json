@@ -42,12 +42,12 @@
         "ollama.baseUrl": {
           "type": "string",
           "default": "http://localhost:11434",
-          "description": "Ollama API base URL"
+          "description": "Ollama API origin (scheme + host + port only, e.g. http://localhost:11434 — no path)."
         },
         "ollama.routerUrl": {
           "type": "string",
           "default": "http://localhost:4001",
-          "description": "Smart router base URL (OpenAI-compatible /v1; OrbStack: http://router.ollama-stack.orb.local:4001)"
+          "description": "Smart router origin only (no /v1). GET /v1/models from the router is synthetic; use ollama list for pulled models. OrbStack: http://router.ollama-stack.orb.local:4001 if localhost is blocked."
         },
         "ollama.routerBearerToken": {
           "type": "string",

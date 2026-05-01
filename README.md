@@ -91,6 +91,29 @@ Cursor and other clients can use **several** “agents” or backends at once. U
 
 ---
 
+## Ollama OpenAI compatibility (official behavior + this stack)
+
+Official reference: [Ollama OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility) (Chat Completions, `GET /v1/models`, streaming, `stream_options` / `include_usage`). Usage fields are described in [Usage](https://docs.ollama.com/api/usage).
+
+**Clients (Cursor, Windsurf, Commit Sage, etc.)**
+
+- Point the OpenAI **base URL** at the path that ends with **`/v1`** (e.g. `http://localhost:4001/v1` for this router, or `http://localhost:11434/v1` for Ollama directly). Many SDKs expect a **non-empty API key**; Ollama **ignores** it — use any placeholder (`sk-local-dev-key`, `ollama`, etc.).
+- **`/v1/responses`** exists in newer Ollama builds as an additive API; this router implements **`/v1/chat/completions`** only.
+- **`/v1/images/generations`** is **experimental** upstream and may change — do not rely on it for production workflows.
+
+**Unsupported or limited Chat Completions fields (upstream)**
+
+Ollama’s compatibility layer does not support everything OpenAI’s API accepts. Sending unsupported fields may error or be ignored. Common gaps include **`tool_choice`**, **`logit_bias`**, **`user`**, **`n`**, and **`logprobs`** for chat — see the official table linked above.
+
+**This repo’s smart router (`router/server.py`)**
+
+- **`GET /v1/models`** is a **synthetic** list (shortcuts like `auto`, `commit`, and each model from the routing table). It does **not** call Ollama’s `GET /v1/models`. For **ground truth** on what is pulled, use `ollama list`, Open WebUI, or `curl http://localhost:11434/api/tags`. For extra local names, use Ollama’s **`ollama cp`** ([OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)).
+- **Classification** is fast keyword/heuristic routing in [`router/classifier.py`](router/classifier.py). A **wrong route** sends the request to a suboptimal model (quality/latency), not only a slow path. Use **`POST /route`** on the router (same host/port as chat) with `{"messages":[...]}` to inspect `model`, `reason`, and `route_key` without running the LLM.
+- **Streaming:** the router forwards the full upstream response after Ollama completes the HTTP response (`urlopen` + `read()`). Clients that set **`stream: true`** still get a valid SSE body, but **first-byte latency** is not the same as talking to Ollama directly chunk-by-chunk. **`stream_options` / `include_usage`** are passed through in the JSON body to Ollama; router **Prometheus token counters** (from `usage`) only increment on **non-streaming** `application/json` responses — streaming clients often omit `usage` unless they request it per upstream docs.
+- **Security / ops:** **`OLLAMA_BASE_URL`** for the router is **server-side only** (Docker env / compose). Point it at a **single trusted** Ollama instance; do not expose a user-controlled upstream URL through this proxy. **`GET /metrics`** serves Prometheus text without auth — keep the router on **localhost** or put it behind a reverse proxy if the port is reachable from untrusted networks.
+
+---
+
 ## Model management
 
 ```bash
@@ -172,7 +195,7 @@ Cursor Settings → Models → OpenAI override (or `cursor.openai.apiBase` / `cu
 - Model: `auto` or `router` for automatic routing; or `commit` / `commit-sage` to force the git-commit model; or any Ollama model id the router exposes (e.g. `qwen2.5-coder:7b`) for a fixed model.
 - `task sync-cursor-models` writes `~/.cursor/ollama-router-model-list.json` from live `GET /v1/models`; it does **not** populate Cursor’s Settings UI (Cursor reads models from the API, not arbitrary `settings.json` keys).
 
-**Commit Sage** (VS Code / Cursor extension `VizzleTF.geminicommit`): set provider to **OpenAI**, **Base URL** `http://localhost:4001/v1`, API key as above, and keep default model **`gpt-3.5-turbo`** — the router upgrades to **`qwen2.5-coder-14b`** when the prompt looks like a diff/commit. To force the commit model without classification, set model to **`commit`** or **`commit-sage`**.
+**Commit Sage** (VS Code / Cursor extension `VizzleTF.geminicommit`): set provider to **OpenAI-compatible**, **Base URL** `http://localhost:4001/v1`, API key as above, and set the model to **`commit`** or **`commit-sage`** so diffs always use the git-commit route model, or **`auto`** / **`router`** for classifier routing. This router does not accept cloud vendor model ids; use Ollama names (from **`GET /v1/models`** or `ollama list`) for a fixed model.
 
 ### Windsurf
 
@@ -242,9 +265,9 @@ code --install-extension vscode-extension/ollama-local-llm-1.0.0.vsix
 
 | Setting | Default | Description |
 |---|---|---|
-| `ollama.baseUrl` | `http://localhost:11434` | Ollama API URL |
-| `ollama.routerUrl` | `http://localhost:4001` | Smart router base URL (OpenAI-compatible `/v1`) |
-| `ollama.routerBearerToken` | `sk-local-dev-key` | Bearer sent to router (placeholder) |
+| `ollama.baseUrl` | `http://localhost:11434` | Ollama API URL (`http://` or `https://`, host, port; no path) |
+| `ollama.routerUrl` | `http://localhost:4001` | Smart router base URL only (scheme + host + port, **no** `/v1` suffix). `GET /v1/models` from the router is **synthetic** — see [Ollama OpenAI compatibility](#ollama-openai-compatibility-official-behavior--this-stack). Use OrbStack hostname if localhost is blocked. |
+| `ollama.routerBearerToken` | `sk-local-dev-key` | Bearer sent to router (placeholder; Ollama ignores API keys) |
 | `ollama.defaultModel` | `qwen2.5-coder:7b` | Active model |
 | `ollama.temperature` | `0.7` | Sampling temperature |
 
@@ -283,7 +306,7 @@ Use ollama_chat with qwen2.5-coder:7b to rewrite this prompt to be more specific
 
 ## Changing router models
 
-Edit [`router/classifier.py`](router/classifier.py) (`ROUTES` and routing logic), then restart the router: `task restart -- router`.
+Edit [`router/classifier.py`](router/classifier.py) (`ROUTES` and routing logic), then restart the router: `task restart -- router`. For client-visible names beyond the routing table, prefer Ollama’s **`ollama cp`** ([docs](https://docs.ollama.com/api/openai-compatibility)). After changes, **`POST /route`** (see [compatibility section](#ollama-openai-compatibility-official-behavior--this-stack)) helps verify classification without spending tokens.
 
 ---
 
@@ -332,7 +355,13 @@ task logs -- ollama
 ```bash
 task logs -- router
 task restart -- router
+curl -sf http://localhost:4001/health
+curl -sf http://localhost:4001/v1/models | head
 ```
+
+**Grafana token panels flat while chat works**
+
+Streaming clients often omit **`usage`** in the response unless the client sets OpenAI-style **`stream_options`** (see [Ollama OpenAI compatibility](#ollama-openai-compatibility-official-behavior--this-stack)). The router’s Prometheus token counters only parse **`usage`** on **non-streaming** JSON responses.
 
 **Extension: Python backend not found**
 - Run `task ext-install` from `vscode-extension/` directory first
