@@ -7,10 +7,11 @@ from router.classifier import ROUTES
 KNOWN_OLLAMA_MODELS = {
     "qwen2.5-coder:14b",
     "qwen2.5-coder:7b",
-    "gemma4:27b",
+    "deepseek-coder:33b",
+    "deepseek-coder:6.7b",
     "gemma4:latest",
-    "llama3.3:70b",
     "phi4:latest",
+    "nomic-embed-text:latest",
 }
 
 

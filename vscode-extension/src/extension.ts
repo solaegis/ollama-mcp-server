@@ -269,7 +269,7 @@ async function cmdOpenPanel() {
 async function cmdPullModel() {
   const name = await vscode.window.showInputBox({
     prompt: 'Model to pull from Ollama registry',
-    placeHolder: 'e.g. llama3.3:70b, qwen2.5-coder:14b, phi4:latest',
+    placeHolder: 'e.g. deepseek-coder:33b, qwen2.5-coder:14b, phi4:latest',
     value: '',
   });
   if (!name) { return; }

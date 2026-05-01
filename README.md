@@ -110,8 +110,8 @@ Browse available models: https://ollama.com/library
 | `qwen2.5-coder:14b` | Code + reasoning | ~10 GB |
 | `deepseek-coder:6.7b` | DeepSeek Coder; fits typical Docker Desktop RAM for `ollama` | ~4 GB |
 | `deepseek-coder:33b` | DeepSeek Coder; strong codegen (see Docker note below) | ~19 GB |
-| `phi4:latest` | General, fast | ~9 GB |
-| `llama3.3:70b` | Deep reasoning | ~45 GB |
+| `phi4:latest` | General, summarization, docs routing | ~9 GB |
+| `gemma4:latest` | Quick Q&A routing | ~10 GB |
 | `nomic-embed-text` | Embeddings | ~300 MB |
 
 Several of these can be loaded simultaneously on the M2 Ultra when Ollama has access to the full machine (native install or a container with a high memory limit).

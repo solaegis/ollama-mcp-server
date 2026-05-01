@@ -5,14 +5,14 @@ Classifies an incoming chat request and returns the best local model for it.
 Uses Ollama native model names (with colons, e.g. "qwen2.5-coder:14b") which
 are passed directly to Ollama's OpenAI-compatible API at /v1/chat/completions.
 
-Model assignments (tuned for Nuvent / Rust / IaC workloads):
+Model assignments (aligned with typical pulled sets: qwen2.5-coder, deepseek-coder, phi4, gemma4):
   git_commit     → qwen2.5-coder:14b   Diffs, conventional commits, Commit Sage
-  summarization  → gemma4:27b           Long-context summaries, PRs, changelogs
-  rust_code      → qwen2.5-coder:14b   Best Rust on Polyglot benchmark
+  summarization  → phi4:latest         Long-context summaries, PRs, changelogs
+  rust_code      → qwen2.5-coder:14b   Strong codegen
   general_code   → qwen2.5-coder:7b    Fast, good enough for completions
-  architecture   → gemma4:27b           256K context, strong reasoning
-  docs_writing   → llama3.3:70b         Best local prose generation
-  quick_qa       → gemma4:latest        Fast, 128K context
+  architecture   → deepseek-coder:33b  System design / tradeoffs (needs ~19GB+ headroom)
+  docs_writing   → phi4:latest        Documentation and prose
+  quick_qa       → gemma4:latest       Fast Q&A
   default        → qwen2.5-coder:7b    Safe fallback
 """
 
@@ -41,7 +41,7 @@ ROUTES: dict[str, Route] = {
     ),
     "summarization": Route(
         "summarization",
-        "gemma4:27b",
+        "phi4:latest",
         "Summarization, recap, PR/changelog/standup text",
     ),
     "rust_code": Route(
@@ -56,12 +56,12 @@ ROUTES: dict[str, Route] = {
     ),
     "architecture": Route(
         "architecture",
-        "gemma4:27b",
+        "deepseek-coder:33b",
         "Architecture/design reasoning",
     ),
     "docs_writing": Route(
         "docs_writing",
-        "llama3.3:70b",
+        "phi4:latest",
         "Documentation/prose writing",
     ),
     "quick_qa": Route(
@@ -81,7 +81,7 @@ ROUTES: dict[str, Route] = {
 # Commit-style prompts are checked first so a Rust-heavy diff still routes to
 # git_commit (commit message) rather than rust_code (implementation).
 # Summarization is checked next so "summarize this Rust code" prefers long-context
-# gemma4-27b over rust_code.
+# phi4 over rust_code.
 
 COMMIT_SIGNALS = re.compile(
     r"(diff\s+--git|git\s+diff\b|^\s*@@\s|^\+\+\+\s+[ab]/|^---\s+[ab]/|^\s*index\s+[0-9a-f]{7,}\b|"
