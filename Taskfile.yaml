@@ -7,7 +7,9 @@ vars:
   REPO_DIR:
     sh: pwd
   OLLAMA_URL: http://localhost:11434
-  ROUTER_ORB: http://ollama-router.ollama-stack.orb.local:4001
+  OLLAMA_ORB: http://ollama.ollama-stack.orb.local:11434
+  # Compose service name `router` — resolves reliably on OrbStack (container_name variant may not)
+  ROUTER_ORB: http://router.ollama-stack.orb.local:4001
 
 tasks:
   # ─── Default ──────────────────────────────────────────────────
@@ -47,6 +49,15 @@ tasks:
       - task: _wait-ollama
       - task: status
 
+  update:
+    silent: true
+    desc: Pull latest Ollama image then restart the stack (run when Ollama is too old for new models)
+    cmds:
+      - "{{.COMPOSE}} pull ollama"
+      - "{{.COMPOSE}} up -d --remove-orphans ollama"
+      - task: _wait-ollama
+      - echo "Ollama updated. Run 'task pull -- <model>' to pull any missing models."
+
   down:
     silent: true
     desc: Stop stack (volumes preserved)
@@ -77,6 +88,7 @@ tasks:
         echo "  Prometheus     -> http://localhost:9090"
         echo ""
         echo "Endpoints (OrbStack — use these in Cursor/IDE to avoid SSRF blocks):"
+        echo "  Ollama API     -> {{.OLLAMA_ORB}}"
         echo "  Smart Router   -> {{.ROUTER_ORB}}/v1"
 
   grafana:
@@ -102,6 +114,13 @@ tasks:
           echo "OK  -> http://localhost:11434"
         else
           echo "FAIL -> run: task up"
+        fi
+        echo ""
+        echo "=== Ollama OrbStack hostname ==="
+        if curl -sf --max-time 3 http://ollama.ollama-stack.orb.local:11434/api/tags >/dev/null 2>&1; then
+          echo "  OK  -> http://ollama.ollama-stack.orb.local:11434"
+        else
+          echo "  --     http://ollama.ollama-stack.orb.local:11434"
         fi
         echo ""
         echo "=== Router container ==="
@@ -295,28 +314,9 @@ tasks:
   setup-cursor:
     silent: true
     desc: Write MCP + OpenAI provider config to Cursor settings
+    deps: [build]
     cmds:
-      - |
-        python3 -c "
-        import json, pathlib
-        dist = '{{.REPO_DIR}}/dist/index.js'
-        mcp_path = pathlib.Path.home() / '.cursor' / 'mcp.json'
-        mcp_path.parent.mkdir(parents=True, exist_ok=True)
-        mcp = json.loads(mcp_path.read_text()) if mcp_path.exists() else {}
-        mcp.setdefault('mcpServers', {})['ollama'] = {
-          'command': 'node',
-          'args': [dist],
-          'env': {'OLLAMA_BASE_URL': 'http://localhost:11434'}
-        }
-        mcp_path.write_text(json.dumps(mcp, indent=2))
-        print('MCP written:', mcp_path)
-        settings_path = pathlib.Path.home() / 'Library' / 'Application Support' / 'Cursor' / 'User' / 'settings.json'
-        settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
-        settings['cursor.openai.apiKey'] = 'sk-local-dev-key'
-        settings['cursor.openai.apiBase'] = 'http://ollama-router.ollama-stack.orb.local:4001/v1'
-        settings_path.write_text(json.dumps(settings, indent=4))
-        print('Cursor settings written:', settings_path)
-        "
+      - python3 "{{.REPO_DIR}}/scripts/setup_cursor_config.py" "{{.REPO_DIR}}"
 
   sync-cursor-models:
     silent: true
@@ -352,7 +352,10 @@ tasks:
         cfg.setdefault('mcpServers', {})['ollama'] = {
           'command': 'node',
           'args': [dist],
-          'env': {'OLLAMA_BASE_URL': 'http://localhost:11434'}
+          'env': {
+            'OLLAMA_BASE_URL': 'http://localhost:11434',
+            'ROUTER_BASE_URL': 'http://localhost:4001',
+          },
         }
         cfg_path.write_text(json.dumps(cfg, indent=2))
         print('Written:', cfg_path)

@@ -6,7 +6,7 @@ VS Code extension) can optionally POST to /route to get a model recommendation,
 or just use the /v1/chat/completions passthrough which auto-selects the model.
 
 Requests are forwarded directly to Ollama's OpenAI-compatible API
-(/v1/chat/completions) — LiteLLM is not used.
+(/v1/chat/completions).
 
 Endpoints:
   POST /v1/chat/completions   OpenAI-compatible. Auto-routes then proxies to Ollama.

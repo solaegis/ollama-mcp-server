@@ -1,4 +1,4 @@
-"""HTTP tests for router.server (FastAPI) with LiteLLM mocked."""
+"""HTTP tests for router.server (FastAPI) with Ollama upstream mocked."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _mock_urlopen_response(payload: dict, status: int = 200) -> MagicMock:
 
 
 @patch("router.server.urllib.request.urlopen")
-def test_chat_completions_auto_forwards_to_litellm(mock_urlopen: MagicMock) -> None:
+def test_chat_completions_auto_forwards_to_ollama(mock_urlopen: MagicMock) -> None:
     mock_urlopen.return_value = _mock_urlopen_response(
         {
             "id": "chatcmpl-test",
@@ -106,7 +106,7 @@ def test_chat_completions_http_error(mock_urlopen: MagicMock) -> None:
     import urllib.error
 
     err = urllib.error.HTTPError(
-        "http://localhost:4000/v1/chat/completions",
+        "http://localhost:11434/v1/chat/completions",
         500,
         "Internal Server Error",
         {},

@@ -16,15 +16,117 @@ import {
   TaskSchema,
   GitCommitSchema,
   SummarizeSchema,
+  type GitCommitParams,
 } from './types.js';
 
 // ─── Clients ──────────────────────────────────────────────────────────────
 const ollamaBaseUrl   = process.env.OLLAMA_BASE_URL    || 'http://localhost:11434';
 const routerBaseUrl   = process.env.ROUTER_BASE_URL    || 'http://localhost:4001';
-const litellmKey      = process.env.LITELLM_MASTER_KEY || 'sk-local-dev-key';
+/** Bearer token for router OpenAI-compatible endpoints (Cursor sends this; router does not validate). */
+const routerBearer    = process.env.ROUTER_BEARER_TOKEN || 'sk-local-dev-key';
 
 const ollama = new OllamaClient(ollamaBaseUrl);
-const router = new RouterClient(routerBaseUrl, litellmKey);
+const router = new RouterClient(routerBaseUrl, routerBearer);
+
+function routerModelForGitTask(task: GitCommitParams['git_task']): string {
+  if (task === 'commit_message' || task === 'pr_title') return 'commit';
+  return 'auto';
+}
+
+function buildGitCommitMessages(params: GitCommitParams): {
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  temperature: number;
+} {
+  const task = params.git_task;
+  const model = routerModelForGitTask(task);
+  const diffBlock = params.diff?.trim() ? `--- Diff ---\n${params.diff.trim()}` : '';
+  const contentBlock = params.content?.trim() ? `--- Additional content ---\n${params.content.trim()}` : '';
+  const blocks = [diffBlock, contentBlock].filter(Boolean).join('\n\n');
+  const ctxLine = params.context?.trim() ? `User context: ${params.context.trim()}\n\n` : '';
+
+  if (task === 'commit_message') {
+    const contextLine = params.context ? `\nContext: ${params.context}\n` : '';
+    const scopeHint = params.scope
+      ? `\nScope hint: "${params.scope}" — use this as the commit scope.`
+      : '\nInfer scope from changed file paths (e.g. src/auth/ → auth, router/ → router, src/index.ts → server). Omit scope if truly cross-cutting.';
+    const breakingInstructions = params.breaking
+      ? '\nThis is a BREAKING CHANGE. You MUST add a blank line after the subject, then a "BREAKING CHANGE: <description>" footer explaining what breaks and how to migrate.'
+      : '\nIf the diff clearly removes an export, changes a public API signature, or deletes an endpoint, include a BREAKING CHANGE: footer.';
+    const issueFooter = params.issue
+      ? `\nInclude this footer line at the end: "Closes #${params.issue}"`
+      : '';
+
+    const userPrompt =
+      `You are an expert at writing commitizen-compatible conventional git commit messages.\n` +
+      `Write a single conventional commit message for the following diff.\n\n` +
+      `Format:\n` +
+      `  <type>(<scope>): <short description>\n` +
+      `  [blank line]\n` +
+      `  [optional body: bullet points explaining what and why]\n` +
+      `  [blank line]\n` +
+      `  [optional footers: BREAKING CHANGE: ..., Closes #N]\n\n` +
+      `Types: feat, fix, chore, refactor, docs, test, perf, style, ci, build, revert\n\n` +
+      `Rules:\n` +
+      `- Subject: 72 chars max, imperative mood, no period at end\n` +
+      `- Body: add only if non-obvious; bullet points, wrap at 72 chars\n` +
+      `- Output ONLY the commit message. No explanation, no markdown fences.\n` +
+      `${scopeHint}\n` +
+      `${breakingInstructions}\n` +
+      `${issueFooter}\n` +
+      `${contextLine}\n` +
+      `Diff:\n${params.diff}`;
+
+    return { model, messages: [{ role: 'user', content: userPrompt }], temperature: 0.1 };
+  }
+
+  if (task === 'pr_title') {
+    const userPrompt =
+      `${ctxLine}` +
+      `Write a single GitHub pull request title (at most ~72 characters).\n` +
+      `Imperative mood, no trailing period, no quotes. Output ONLY the title line.\n\n` +
+      `${blocks}`;
+    return { model, messages: [{ role: 'user', content: userPrompt }], temperature: 0.15 };
+  }
+
+  if (task === 'pr_body') {
+    const issueLine = params.issue
+      ? `\nInclude a footer line "Closes #${params.issue}" if appropriate, or link the issue in **What**/**Why**.`
+      : '';
+    const userPrompt =
+      `${ctxLine}` +
+      `Write a GitHub pull request description in Markdown.\n` +
+      `Use these sections: **What**, **Why**, **How tested** (use bullets where helpful).\n` +
+      `Do not wrap the whole answer in a markdown fence. No HTML.${issueLine}\n\n` +
+      `${blocks}`;
+    return { model, messages: [{ role: 'user', content: userPrompt }], temperature: 0.25 };
+  }
+
+  if (task === 'gh_command_plan') {
+    const instr = params.instruction?.trim() ?? '';
+    const userPrompt =
+      `${ctxLine}` +
+      `Goal (plain English): ${instr}\n\n` +
+      `Produce a numbered list of shell commands the user can copy-paste.\n` +
+      `Rules:\n` +
+      `- Use only standard \`git\` and \`gh\` (GitHub CLI) commands plus common POSIX helpers already implied by git/gh.\n` +
+      `- If critical information is missing (branch name, PR number, remote), say exactly what to run first to discover it (e.g. \`git status -sb\`, \`gh pr status\`).\n` +
+      `- Clearly mark destructive operations (force-push, hard reset, branch deletion).\n` +
+      `- Never invent secrets, tokens, or PATs; never claim commands already ran.\n` +
+      `- For opening or updating PRs, prefer \`gh pr create\`, \`gh pr edit\`, \`gh pr view\`, \`gh pr diff\` as appropriate.\n\n` +
+      `${blocks}`;
+    return { model, messages: [{ role: 'user', content: userPrompt }], temperature: 0.15 };
+  }
+
+  // review_thread_reply
+  const userPrompt =
+    `${ctxLine}` +
+    `Draft a concise, professional reply to a code review thread (Markdown OK).\n` +
+    `Address each review comment; propose concrete code or test changes where possible; ask a short clarifying question only if needed.\n` +
+    `Output only text suitable to paste into GitHub — no preamble like "Here is a reply".\n\n` +
+    `${blocks}`;
+  return { model, messages: [{ role: 'user', content: userPrompt }], temperature: 0.25 };
+}
 
 // ─── Tool definitions ─────────────────────────────────────────────────────
 
@@ -66,41 +168,60 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'ollama_git_commit',
+    name: 'ollama_git',
     description:
-      'Generate a commitizen-compatible conventional commit message from a git diff. ' +
-      'Supports feat/fix/chore/refactor/docs/test/perf/style/ci/build/revert types. ' +
-      'Automatically infers scope from changed file paths. Supports optional BREAKING CHANGE ' +
-      'footer and Closes #N issue reference. Uses smart router (git_commit → qwen2.5-coder:14b). ' +
-      'Returns only the commit message, ready to use. Get the diff with: git diff --staged',
+      'Local LLM helper for git and GitHub CLI workflows via the smart router. ' +
+      'Use git_task to choose output: conventional commit message from a diff (default), PR title, PR body, ' +
+      'a safe step-by-step git+gh command plan from a stated goal, or a draft reply to a code review thread. ' +
+      'Does not run shell commands — you execute suggested git/gh yourself. ' +
+      'For commit_message: pass diff (e.g. git diff --staged). For PRs: pass diff and/or pasted gh pr diff / summary in content.',
     inputSchema: {
       type: 'object',
       properties: {
+        git_task: {
+          type: 'string',
+          enum: [
+            'commit_message',
+            'pr_title',
+            'pr_body',
+            'gh_command_plan',
+            'review_thread_reply',
+          ],
+          description:
+            'commit_message (default): conventional commit from diff. pr_title / pr_body: GitHub PR text. ' +
+            'gh_command_plan: numbered git+gh steps (requires instruction). review_thread_reply: draft reply (requires content).',
+        },
         diff: {
           type: 'string',
-          description: 'Output of git diff --staged or git diff HEAD.',
+          description: 'Git diff text (staged, branch range, or gh pr diff output).',
+        },
+        content: {
+          type: 'string',
+          description:
+            'Optional or required context: logs, gh pr view, issue body, review thread + code snippets.',
+        },
+        instruction: {
+          type: 'string',
+          description: 'For gh_command_plan: what to accomplish in plain English.',
         },
         context: {
           type: 'string',
-          description: 'Optional: brief description of what changed and why.',
+          description: 'Optional human note: intent, risk, or links.',
         },
         scope: {
           type: 'string',
-          description:
-            'Optional scope hint (e.g. "auth", "router", "api"). ' +
-            'If omitted, scope is inferred from changed file paths in the diff.',
+          description: 'Optional commit scope hint (commit_message only).',
         },
         breaking: {
           type: 'boolean',
-          description: 'Set true for breaking changes. Adds a BREAKING CHANGE: footer.',
+          description: 'commit_message: hint that the change is breaking.',
         },
         issue: {
           type: 'integer',
-          description: 'GitHub issue number (e.g. 42). Adds "Closes #42" footer.',
+          description: 'Optional GitHub issue number for Closes #N or PR linking line.',
           minimum: 1,
         },
       },
-      required: ['diff'],
     },
   },
   {
@@ -242,48 +363,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return text(`[routed to: ${routed}]\n\n${content}`);
       }
 
-      case 'ollama_git_commit': {
+      case 'ollama_git': {
         const params = GitCommitSchema.parse(args);
-
-        const contextLine = params.context ? `\nContext: ${params.context}\n` : '';
-        const scopeHint = params.scope
-          ? `\nScope hint: "${params.scope}" — use this as the commit scope.`
-          : '\nInfer scope from changed file paths (e.g. src/auth/ → auth, router/ → router, src/index.ts → server). Omit scope if truly cross-cutting.';
-        const breakingInstructions = params.breaking
-          ? '\nThis is a BREAKING CHANGE. You MUST add a blank line after the subject, then a "BREAKING CHANGE: <description>" footer explaining what breaks and how to migrate.'
-          : '\nIf the diff clearly removes an export, changes a public API signature, or deletes an endpoint, include a BREAKING CHANGE: footer.';
-        const issueFooter = params.issue
-          ? `\nInclude this footer line at the end: "Closes #${params.issue}"`
-          : '';
-
-        const prompt =
-          `You are an expert at writing commitizen-compatible conventional git commit messages.\n` +
-          `Write a single conventional commit message for the following diff.\n\n` +
-          `Format:\n` +
-          `  <type>(<scope>): <short description>\n` +
-          `  [blank line]\n` +
-          `  [optional body: bullet points explaining what and why]\n` +
-          `  [blank line]\n` +
-          `  [optional footers: BREAKING CHANGE: ..., Closes #N]\n\n` +
-          `Types: feat, fix, chore, refactor, docs, test, perf, style, ci, build, revert\n\n` +
-          `Rules:\n` +
-          `- Subject: 72 chars max, imperative mood, no period at end\n` +
-          `- Body: add only if non-obvious; bullet points, wrap at 72 chars\n` +
-          `- Output ONLY the commit message. No explanation, no markdown fences.\n` +
-          `${scopeHint}\n` +
-          `${breakingInstructions}\n` +
-          `${issueFooter}\n` +
-          `${contextLine}\n` +
-          `Diff:\n${params.diff}`;
-
+        const { model, messages, temperature } = buildGitCommitMessages(params);
         const response = await router.chat({
-          model: 'auto',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1,
+          model,
+          messages,
+          temperature,
         });
-
+        const routed = response.model ?? 'unknown';
         const message = response.choices?.[0]?.message?.content?.trim() ?? '(no response)';
-        return text(message);
+        if (params.git_task === 'commit_message') {
+          return text(message);
+        }
+        return text(`[git_task=${params.git_task} routed:${routed}]\n\n${message}`);
       }
 
       case 'ollama_summarize': {

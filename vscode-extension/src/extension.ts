@@ -149,13 +149,13 @@ async function refreshStatusBar() {
     const health = await bridge.call<Record<string, boolean>>('health');
     const loaded = await bridge.call<Array<{ name: string; vram_gb: number }>>('loaded_models');
     const ollamaOk = health['ollama'] ?? false;
-    const litellmOk = health['litellm'] ?? false;
+    const routerOk = health['router'] ?? false;
     const model = getModel();
     const inMem = loaded.some(m => m.name === model);
     const indicator = ollamaOk ? (inMem ? '●' : '○') : '✕';
-    const stack = litellmOk ? '+stack' : '';
+    const stack = routerOk ? '+router' : '';
     updateStatusBar(`${indicator} ${model} ${stack}`.trim(),
-      `Model: ${model}\nOllama: ${ollamaOk ? 'online' : 'offline'}\nLiteLLM: ${litellmOk ? 'online' : 'offline'}\nLoaded in memory: ${inMem}`);
+      `Model: ${model}\nOllama: ${ollamaOk ? 'online' : 'offline'}\nRouter: ${routerOk ? 'online' : 'offline'}\nLoaded in memory: ${inMem}`);
   } catch {
     updateStatusBar(`${getModel()} — error`, undefined, new vscode.ThemeColor('statusBarItem.errorForeground'));
   }
@@ -509,8 +509,8 @@ export function activate(context: vscode.ExtensionContext) {
   const c = cfg();
   const env: NodeJS.ProcessEnv = {
     OLLAMA_BASE_URL: c.get('baseUrl', 'http://localhost:11434'),
-    LITELLM_BASE_URL: c.get('litellmUrl', 'http://localhost:4000'),
-    LITELLM_MASTER_KEY: c.get('litellmKey', 'sk-local-dev-key'),
+    ROUTER_BASE_URL: c.get('routerUrl', 'http://localhost:4001'),
+    ROUTER_BEARER_TOKEN: c.get('routerBearerToken', 'sk-local-dev-key'),
   };
 
   bridge.start(scriptPath, env);

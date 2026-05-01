@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 # ─── Model routing table ──────────────────────────────────────────────────
-# Names must match model_name entries in config/litellm.yaml exactly.
+# Models are Ollama-native names (name:tag); router forwards to Ollama /v1/chat/completions.
 
 
 @dataclass(frozen=True)

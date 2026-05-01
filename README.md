@@ -7,7 +7,7 @@ Local LLM stack for Mac — Ollama runtime, OpenAI-compatible proxy, MCP server 
 | Component | Purpose |
 |---|---|
 | **MCP server** (`src/`) | Exposes Ollama tools to any MCP client: list, generate, chat, embeddings |
-| **Docker stack** (`docker/`) | Ollama + LiteLLM proxy + Open WebUI + Prometheus + Grafana |
+| **Docker stack** (`docker/`) | Ollama + smart router + Open WebUI + Prometheus + Grafana |
 | **VS Code extension** (`vscode-extension/`) | Status bar, model picker, send/rewrite selection, chat panel |
 | **Taskfile** | One-command lifecycle for all of the above |
 
@@ -52,7 +52,7 @@ task up
 
 # 4. Verify everything
 task test-ollama      # lists available models
-task test-litellm     # smoke-tests OpenAI-compatible endpoint
+task orb-check        # optional: verify OrbStack hostnames for Cursor
 
 # 5. Wire MCP into Cursor (writes ~/.cursor/mcp.json)
 task setup-cursor
@@ -66,8 +66,7 @@ task setup-claude-desktop
 | Service | URL | Purpose |
 |---|---|---|
 | Ollama API | `http://localhost:11434` | Direct model API |
-| LiteLLM proxy | `http://localhost:4000` | OpenAI-compatible (direct or behind router) |
-| Smart router | `http://localhost:4001` | OpenAI-compatible + classifier; **use this for Cursor / Commit Sage** |
+| Smart router | `http://localhost:4001` | OpenAI-compatible + classifier → Ollama; **use this for Cursor / Commit Sage** |
 | Open WebUI | `http://localhost:8080` | Browser chat UI |
 | Grafana | `http://localhost:3001` | Usage metrics |
 | Prometheus | `http://localhost:9090` | Raw metrics |
@@ -81,9 +80,9 @@ Cursor and other clients can use **several** “agents” or backends at once. U
 | Use this | When |
 |---|---|
 | **Cursor cloud / subscription models** (default Chat, Composer, etc.) | Hard problems: architecture, large refactors, debugging across many files, planning, or when you need the strongest available model. |
-| **MCP tools** (`ollama_task`, `ollama_summarize`, `ollama_git_commit`, …) | Offload **repetitive or token-heavy** work to **local** models: conventional commits from diffs, long summaries, embeddings, quick local checks. Saves **context and cost** on the cloud agent; the **smart router** picks a model from prompt content when the tool uses `model: auto`. Prefer these tools in the **agent** chat when the task does not need frontier reasoning. |
-| **OpenAI-compatible override → smart router** (`http://localhost:4001/v1`, model `auto` or a LiteLLM alias) | **Local** Chat sessions that should follow the same **routing** as MCP (code vs docs vs summarization, etc.). Use **Verify** so `GET /v1/models` populates the list. Not every Composer surface respects custom providers—if in doubt, use **Chat** or **MCP** for local routing. |
-| **VS Code / Cursor extension** (`Ollama: …` commands) | **Editor-native** flows: send selection, rewrite selection, side chat panel, model picker. Calls **Ollama directly** by default (not the smart router) unless you point integration at LiteLLM/router yourself. |
+| **MCP tools** (`ollama_task`, `ollama_summarize`, `ollama_git`, …) | Offload **repetitive or token-heavy** work to **local** models: conventional commits from diffs, long summaries, embeddings, quick local checks. Saves **context and cost** on the cloud agent; the **smart router** picks a model from prompt content when the tool uses `model: auto`. Prefer these tools in the **agent** chat when the task does not need frontier reasoning. |
+| **OpenAI-compatible override → smart router** (`http://localhost:4001/v1`, model `auto` or an Ollama model id) | **Local** Chat sessions that follow the same **routing** as MCP (code vs docs vs summarization, etc.). Use **Verify** so `GET /v1/models` populates the list. Not every Composer surface respects custom providers—if in doubt, use **Chat** or **MCP** for local routing. |
+| **VS Code / Cursor extension** (`Ollama: …` commands) | **Editor-native** flows: send selection, rewrite selection, side chat panel, model picker. Calls **Ollama directly** by default; optional **router** URL in settings for OpenAI-style calls via the smart router. |
 
 **Practical split:** keep **cloud** for the work only a strong model should do; push **commits, summaries, and bulk local inference** to MCP or the local router so your main agent’s context stays focused on coding and design.
 
@@ -127,7 +126,10 @@ All four can be loaded simultaneously on the M2 Ultra.
     "ollama": {
       "command": "node",
       "args": ["/Users/lvavasour/git/solaegis/ollama-mcp-server/dist/index.js"],
-      "env": { "OLLAMA_BASE_URL": "http://localhost:11434" }
+      "env": {
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "ROUTER_BASE_URL": "http://localhost:4001"
+      }
     }
   }
 }
@@ -136,18 +138,18 @@ All four can be loaded simultaneously on the M2 Ultra.
 For the **OpenAI-compatible provider** (Cursor chat/composer using local models), point at the **smart router** (port **4001**) so requests can be classified (code vs docs vs **git commit**, etc.):
 
 Cursor Settings → Models → OpenAI override (or `cursor.openai.apiBase` / `cursor.openai.apiKey` in `settings.json`):
-- API Base: `http://localhost:4001/v1` (or `http://ollama-router.ollama-stack.orb.local:4001/v1` when using OrbStack hostnames from `task setup-cursor`). The router proxies **`GET /v1/models`** to LiteLLM so Cursor can **discover** model IDs (use **Verify** if the list is empty).
-- API Key: `sk-local-dev-key` (same as `LITELLM_MASTER_KEY` in `.env`)
-- Model: `auto` or `router` for automatic routing; or `commit` / `commit-sage` to force the git-commit model; or any `model_name` from `config/litellm.yaml` (e.g. `qwen2.5-coder-7b`) for a fixed model.
-- `task sync-cursor-models` writes a reference list under `~/.cursor/ollama-router-model-list.json` and checks `GET /v1/models`; it does **not** populate Cursor’s Settings UI (Cursor reads models from the API, not arbitrary `settings.json` keys).
+- API Base: `http://localhost:4001/v1` (or `http://router.ollama-stack.orb.local:4001/v1` from `task setup-cursor` / `task status` — OrbStack DNS for the `router` service; avoids Cursor SSRF blocks on localhost). The router serves **`GET /v1/models`** from its routing table so Cursor can **discover** model IDs (use **Verify** if the list is empty).
+- API Key: any non-empty string (e.g. `sk-local-dev-key`) — placeholder Bearer token; the router does not validate it.
+- Model: `auto` or `router` for automatic routing; or `commit` / `commit-sage` to force the git-commit model; or any Ollama model id the router exposes (e.g. `qwen2.5-coder:7b`) for a fixed model.
+- `task sync-cursor-models` writes `~/.cursor/ollama-router-model-list.json` from live `GET /v1/models`; it does **not** populate Cursor’s Settings UI (Cursor reads models from the API, not arbitrary `settings.json` keys).
 
 **Commit Sage** (VS Code / Cursor extension `VizzleTF.geminicommit`): set provider to **OpenAI**, **Base URL** `http://localhost:4001/v1`, API key as above, and keep default model **`gpt-3.5-turbo`** — the router upgrades to **`qwen2.5-coder-14b`** when the prompt looks like a diff/commit. To force the commit model without classification, set model to **`commit`** or **`commit-sage`**.
 
 ### Windsurf
 
 Settings → AI Providers → Add Custom:
-- Base URL: `http://localhost:4000/v1`
-- API Key: `sk-local-dev-key`
+- Base URL: `http://localhost:4001/v1`
+- API Key: `sk-local-dev-key` (placeholder)
 
 ### Zed
 
@@ -156,7 +158,7 @@ Settings → AI Providers → Add Custom:
 {
   "language_models": {
     "openai": {
-      "api_url": "http://localhost:4000/v1",
+      "api_url": "http://localhost:4001/v1",
       "available_models": [
         { "name": "qwen2.5-coder:7b", "max_tokens": 32768 },
         { "name": "phi4", "max_tokens": 16384 }
@@ -212,14 +214,15 @@ code --install-extension vscode-extension/ollama-local-llm-1.0.0.vsix
 | Setting | Default | Description |
 |---|---|---|
 | `ollama.baseUrl` | `http://localhost:11434` | Ollama API URL |
-| `ollama.litellmUrl` | `http://localhost:4000` | LiteLLM proxy URL |
+| `ollama.routerUrl` | `http://localhost:4001` | Smart router base URL (OpenAI-compatible `/v1`) |
+| `ollama.routerBearerToken` | `sk-local-dev-key` | Bearer sent to router (placeholder) |
 | `ollama.defaultModel` | `qwen2.5-coder:7b` | Active model |
 | `ollama.temperature` | `0.7` | Sampling temperature |
 
 ### Status bar indicators
 
 ```
-● qwen2.5-coder:7b +stack   — model loaded in memory, LiteLLM running
+● qwen2.5-coder:7b +router  — model loaded in memory, smart router reachable
 ○ qwen2.5-coder:7b          — model available but not yet loaded
 ✕ qwen2.5-coder:7b          — Ollama unreachable
 ```
@@ -232,29 +235,26 @@ Once wired into Cursor/Claude Desktop, these tools are available to the AI agent
 
 | Tool | Description |
 |---|---|
+| `ollama_task` | General local task; router picks model (`model: auto`). |
+| `ollama_git` | Git / GitHub: conventional commit (default `git_task`), PR title/body, numbered `git`+`gh` plans, review-thread replies. Does not run shell—paste output of `git diff` / `gh pr diff` where needed. |
+| `ollama_summarize` | Long-context summaries (PR text, changelogs, etc.). |
 | `ollama_list_models` | List all pulled models |
 | `ollama_generate` | Single-turn prompt → response |
 | `ollama_chat` | Multi-turn conversation with message history |
 | `ollama_embeddings` | Generate vector embeddings |
 
 Example usage in Cursor Agent:
+
 ```
+Use ollama_git with git_task pr_body; paste the output of gh pr diff into diff.
 Use ollama_chat with qwen2.5-coder:7b to rewrite this prompt to be more specific
 ```
 
 ---
 
-## Adding models to LiteLLM routing
+## Changing router models
 
-Edit `config/litellm.yaml` → add to `model_list`:
-```yaml
-- model_name: my-alias
-  litellm_params:
-    model: ollama/modelname:tag
-    api_base: os.environ/OLLAMA_BASE_URL
-```
-
-Restart the proxy: `task restart -- litellm`
+Edit [`router/classifier.py`](router/classifier.py) (`ROUTES` and routing logic), then restart the router: `task restart -- router`.
 
 ---
 
@@ -274,7 +274,7 @@ task list               # list local models
 task ps                 # show loaded models
 task rm-model -- <m>    # delete a model
 task test-ollama        # smoke-test Ollama connection
-task test-litellm       # smoke-test LiteLLM endpoint
+task orb-check          # verify OrbStack / localhost router + Ollama
 task setup-cursor       # write ~/.cursor/mcp.json
 task setup-claude-desktop  # write Claude Desktop MCP config
 task ext-install        # build VS Code extension
@@ -292,10 +292,10 @@ task logs -- ollama
 # Usually: model still loading, or port conflict on 11434
 ```
 
-**LiteLLM not starting**
+**Smart router not reachable**
 ```bash
-task logs -- litellm
-# Usually: config/litellm.yaml syntax error, or Ollama not healthy yet
+task logs -- router
+task restart -- router
 ```
 
 **Extension: Python backend not found**

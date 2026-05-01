@@ -132,23 +132,89 @@ export const TaskSchema = z.object({
   ),
 });
 
-export const GitCommitSchema = z.object({
-  diff: z.string().describe(
-    'Output of git diff --staged or git diff HEAD. Paste the full diff text.'
-  ),
-  context: z.string().optional().describe(
-    'Optional brief description of what changed and why, to help produce a better commit message.'
-  ),
-  scope: z.string().optional().describe(
-    'Optional scope hint (e.g. "auth", "router", "api"). If omitted, scope is inferred from file paths in the diff.'
-  ),
-  breaking: z.boolean().optional().describe(
-    'Set true for breaking changes. Adds a BREAKING CHANGE: footer to the commit message.'
-  ),
-  issue: z.number().int().positive().optional().describe(
-    'GitHub issue number to close (e.g. 42). Adds "Closes #42" footer to the commit message.'
-  ),
-});
+/** What `ollama_git` should produce (router-backed; uses commit routing for tight diffs). */
+export const GitTaskEnum = z.enum([
+  'commit_message',
+  'pr_title',
+  'pr_body',
+  'gh_command_plan',
+  'review_thread_reply',
+]);
+
+export const GitCommitSchema = z
+  .object({
+    git_task: GitTaskEnum.default('commit_message').describe(
+      'commit_message: conventional commit from diff (default). ' +
+        'pr_title: one-line PR title from diff/content. ' +
+        'pr_body: PR description (What/Why/Testing). ' +
+        'gh_command_plan: numbered git + gh CLI steps from instruction + optional context. ' +
+        'review_thread_reply: draft reply to a review thread (paste thread + snippets in content).'
+    ),
+    diff: z
+      .string()
+      .optional()
+      .describe('Git diff text (e.g. git diff --staged, git diff main...HEAD, gh pr diff).'),
+    content: z
+      .string()
+      .optional()
+      .describe(
+        'Extra material: commit log, gh pr view JSON, issue text, multi-file summary, or review thread.'
+      ),
+    instruction: z
+      .string()
+      .optional()
+      .describe(
+        'For git_task=gh_command_plan: goal in plain English (e.g. "open a draft PR against main").'
+      ),
+    context: z.string().optional().describe(
+      'Optional brief description of intent (helps all git_task types).'
+    ),
+    scope: z.string().optional().describe(
+      'Optional scope hint for commit_message (e.g. "auth"). Inferred from paths if omitted.'
+    ),
+    breaking: z.boolean().optional().describe(
+      'commit_message only: set true for BREAKING CHANGE footer when applicable.'
+    ),
+    issue: z.number().int().positive().optional().describe(
+      'commit_message / pr_body: GitHub issue number for Closes #N or linking line.'
+    ),
+  })
+  .superRefine((val, ctx) => {
+    const task = val.git_task ?? 'commit_message';
+    const hasDiff = (val.diff?.trim().length ?? 0) > 0;
+    const hasContent = (val.content?.trim().length ?? 0) > 0;
+    const hasInstr = (val.instruction?.trim().length ?? 0) > 0;
+
+    if (task === 'commit_message') {
+      if (!hasDiff) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'commit_message requires a non-empty diff (e.g. git diff --staged).',
+          path: ['diff'],
+        });
+      }
+      return;
+    }
+    if (task === 'gh_command_plan') {
+      if (!hasInstr) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'gh_command_plan requires instruction (goal in plain English).',
+          path: ['instruction'],
+        });
+      }
+      return;
+    }
+    if (!hasDiff && !hasContent) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide non-empty diff and/or content for this git_task.',
+        path: ['diff'],
+      });
+    }
+  });
+
+export type GitCommitParams = z.infer<typeof GitCommitSchema>;
 
 export const SummarizeSchema = z.object({
   content: z.string().describe('The text, code, or document to summarize.'),

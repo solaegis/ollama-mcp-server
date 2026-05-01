@@ -13,15 +13,15 @@ Protocol:
 from __future__ import annotations
 
 import json
-import sys
 import os
-import urllib.request
+import sys
 import urllib.error
+import urllib.request
 from typing import Any
 
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-LITELLM_BASE = os.environ.get("LITELLM_BASE_URL", "http://localhost:4000")
-LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "sk-local-dev-key")
+ROUTER_BASE = os.environ.get("ROUTER_BASE_URL", "http://localhost:4001").rstrip("/")
+ROUTER_BEARER = os.environ.get("ROUTER_BEARER_TOKEN", "sk-local-dev-key")
 
 
 # ─── HTTP helpers ──────────────────────────────────────────────────────────
@@ -78,21 +78,31 @@ def loaded_models() -> list[dict]:
 
 
 def chat(model: str, messages: list[dict], temperature: float = 0.7, max_tokens: int = 4096) -> str:
-    """Send chat to Ollama directly (bypasses LiteLLM)."""
+    """Send chat to Ollama directly."""
     resp = _post(
         f"{OLLAMA_BASE}/api/chat",
-        {"model": model, "messages": messages, "stream": False,
-         "options": {"temperature": temperature, "num_predict": max_tokens}},
+        {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": temperature, "num_predict": max_tokens},
+        },
     )
     return resp["message"]["content"]
 
 
-def chat_litellm(model: str, messages: list[dict], temperature: float = 0.7, max_tokens: int = 4096) -> str:
-    """Send chat via LiteLLM proxy (OpenAI-compatible)."""
+def chat_router(model: str, messages: list[dict], temperature: float = 0.7, max_tokens: int = 4096) -> str:
+    """Send chat via smart router (OpenAI-compatible /v1/chat/completions → Ollama)."""
     resp = _post(
-        f"{LITELLM_BASE}/v1/chat/completions",
-        {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
-        headers={"Authorization": f"Bearer {LITELLM_KEY}"},
+        f"{ROUTER_BASE}/v1/chat/completions",
+        {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        },
+        headers={"Authorization": f"Bearer {ROUTER_BEARER}"},
     )
     return resp["choices"][0]["message"]["content"]
 
@@ -106,7 +116,10 @@ def pull_model(model: str) -> str:
 def health() -> dict:
     """Check which services are reachable."""
     results: dict[str, bool] = {}
-    for name, url in [("ollama", f"{OLLAMA_BASE}/api/tags"), ("litellm", f"{LITELLM_BASE}/health/liveliness")]:
+    for name, url in [
+        ("ollama", f"{OLLAMA_BASE}/api/tags"),
+        ("router", f"{ROUTER_BASE}/health"),
+    ]:
         try:
             _get(url)
             results[name] = True
@@ -120,12 +133,28 @@ def health() -> dict:
 # arguments regardless of what params dict arrives from the caller.
 
 METHODS: dict[str, tuple[Any, bool]] = {
-    "list_models":   (list_models,   False),
+    "list_models": (list_models, False),
     "loaded_models": (loaded_models, False),
-    "health":        (health,        False),
-    "chat":          (lambda p: chat(p["model"], p["messages"], p.get("temperature", 0.7), p.get("max_tokens", 4096)), True),
-    "chat_litellm":  (lambda p: chat_litellm(p["model"], p["messages"], p.get("temperature", 0.7), p.get("max_tokens", 4096)), True),
-    "pull_model":    (lambda p: pull_model(p["model"]), True),
+    "health": (health, False),
+    "chat": (
+        lambda p: chat(
+            p["model"],
+            p["messages"],
+            p.get("temperature", 0.7),
+            p.get("max_tokens", 4096),
+        ),
+        True,
+    ),
+    "chat_router": (
+        lambda p: chat_router(
+            p["model"],
+            p["messages"],
+            p.get("temperature", 0.7),
+            p.get("max_tokens", 4096),
+        ),
+        True,
+    ),
+    "pull_model": (lambda p: pull_model(p["model"]), True),
 }
 
 

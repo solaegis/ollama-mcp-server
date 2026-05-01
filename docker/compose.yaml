@@ -14,6 +14,7 @@ services:
   # ─── LLM Runtime ──────────────────────────────────────────────
   ollama:
     image: ollama/ollama:latest
+    pull_policy: always
     container_name: ollama
     restart: unless-stopped
     networks: [ollama-net]

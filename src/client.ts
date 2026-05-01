@@ -78,14 +78,14 @@ export class OllamaClient {
 
 export class RouterClient {
   private baseUrl: string;
-  private apiKey: string;
+  private bearerToken: string;
 
   constructor(
     baseUrl: string = 'http://localhost:4001',
-    apiKey: string = 'sk-local-dev-key'
+    bearerToken: string = 'sk-local-dev-key'
   ) {
     this.baseUrl = baseUrl;
-    this.apiKey = apiKey;
+    this.bearerToken = bearerToken;
   }
 
   private async request<T>(
@@ -98,7 +98,7 @@ export class RouterClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
+          'Authorization': `Bearer ${this.bearerToken}`,
         },
         body: JSON.stringify(body),
       });
@@ -137,7 +137,7 @@ export class RouterClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
+        'Authorization': `Bearer ${this.bearerToken}`,
       },
       body: JSON.stringify({ messages }),
     });
