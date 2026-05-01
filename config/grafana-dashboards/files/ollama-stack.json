@@ -2,7 +2,7 @@
   "title": "Ollama Stack",
   "uid": "ollama-stack",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "30s",
   "time": {
     "from": "now-6h",
@@ -564,13 +564,157 @@
     },
     {
       "type": "row",
+      "title": "Smart router \u2014 models & token usage",
+      "id": 23,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Chat completions per model (req/s)",
+      "id": 24,
+      "datasource": {
+        "type": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "sum by (model) (rate(router_chat_completions_total{job=\"router\"}[5m]))",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Prompt tokens per model (context / input, tok/s)",
+      "id": 25,
+      "datasource": {
+        "type": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "sum by (model) (rate(router_chat_completion_prompt_tokens_total{job=\"router\"}[5m]))",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Completion tokens per model (output, tok/s)",
+      "id": 26,
+      "datasource": {
+        "type": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "sum by (model) (rate(router_chat_completion_completion_tokens_total{job=\"router\"}[5m]))",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "row",
       "title": "Ollama runtime \u2014 inference & resources",
       "id": 14,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 50
       },
       "collapsed": false
     },
@@ -585,7 +729,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 34
+        "y": 51
       },
       "fieldConfig": {
         "defaults": {
@@ -637,7 +781,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 34
+        "y": 51
       },
       "fieldConfig": {
         "defaults": {
@@ -681,7 +825,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 42
+        "y": 59
       },
       "fieldConfig": {
         "defaults": {
@@ -725,7 +869,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 42
+        "y": 59
       },
       "fieldConfig": {
         "defaults": {
@@ -769,7 +913,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 67
       },
       "fieldConfig": {
         "defaults": {
@@ -810,7 +954,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 74
       },
       "collapsed": false
     },
@@ -825,7 +969,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 58
+        "y": 75
       },
       "fieldConfig": {
         "defaults": {
@@ -874,11 +1018,11 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 83
       },
       "options": {
         "mode": "markdown",
-        "content": "### Stack layout\n- **Router** (job `router`): Cursor/OpenAI clients hit **port 4001**; Prometheus scrapes **`/metrics`** here \u2014 primary SLO panels above.\n- **Ollama** (job `ollama`): **`up`** needs a recent Ollama build with **`GET /metrics`** on **11434**. If **Ollama scrape up** is **0**, run `curl -sS http://localhost:11434/metrics | head` on the host and **`task update`** to refresh the image.\n- Panels query **`ollama_model_requests_total`** *or* **`requests_total`** \u2014 depending on your Ollama version one series may be empty.\n\n### Useful commands\n```bash\ntask status\ncurl -s http://localhost:9090/api/v1/targets | python3 -m json.tool   # scrape status\ndocker logs ollama-router --tail 80\n```\n"
+        "content": "### Stack layout\n- **Router** (job `router`): Cursor/OpenAI clients hit **port 4001**; Prometheus scrapes **`/metrics`** here \u2014 primary SLO panels above.\n- **Per-model usage**: **`router_chat_completions_total`** counts successful **`/v1/chat/completions`** proxies by **`model`** (the name sent to Ollama). **`router_chat_completion_prompt_tokens_total`** / **`router_chat_completion_completion_tokens_total`** come from the upstream JSON **`usage`** field when the response is **`application/json`** (non-streaming). Streaming clients often omit **`usage`** unless the client sets OpenAI-style **`stream_options`** \u2014 then token panels may stay flat while completion counts still increment.\n- **Ollama** (job `ollama`): **`up`** needs a recent Ollama build with **`GET /metrics`** on **11434**. If **Ollama scrape up** is **0**, run `curl -sS http://localhost:11434/metrics | head` on the host and **`task update`** to refresh the image.\n- Panels query **`ollama_model_requests_total`** *or* **`requests_total`** \u2014 depending on your Ollama version one series may be empty.\n\n### Useful commands\n```bash\ntask status\ncurl -s http://localhost:9090/api/v1/targets | python3 -m json.tool   # scrape status\ndocker logs ollama-router --tail 80\n```\n"
       }
     }
   ]

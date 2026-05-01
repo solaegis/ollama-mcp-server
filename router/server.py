@@ -33,6 +33,7 @@ import urllib.request
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from prometheus_client import Counter
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from .classifier import ROUTES, route
@@ -54,6 +55,23 @@ OPENAI_ALIAS_MAP: dict[str, str] = {
 }
 
 app = FastAPI(title="Ollama Smart Router", version="1.0.0")
+
+# Per-model chat metrics (OpenAI-compatible /v1/chat/completions through the router).
+CHAT_COMPLETIONS_TOTAL = Counter(
+    "router_chat_completions_total",
+    "Chat completions proxied from Ollama with HTTP 200",
+    labelnames=("model",),
+)
+CHAT_PROMPT_TOKENS_TOTAL = Counter(
+    "router_chat_completion_prompt_tokens_total",
+    "Prompt tokens reported in upstream usage (context / input)",
+    labelnames=("model",),
+)
+CHAT_COMPLETION_TOKENS_TOTAL = Counter(
+    "router_chat_completion_completion_tokens_total",
+    "Completion tokens reported in upstream usage (output)",
+    labelnames=("model",),
+)
 
 Instrumentator(
     excluded_handlers=["/health", "/metrics"],
@@ -181,10 +199,37 @@ async def chat_completions(request: Request) -> Response:
         method="POST",
     )
 
+    def _record_chat_metrics(
+        response_body: bytes,
+        status_code: int,
+        media_type: str | None,
+    ) -> None:
+        if status_code != 200:
+            return
+        CHAT_COMPLETIONS_TOTAL.labels(model=model).inc()
+        mtype = (media_type or "").split(";")[0].strip().lower()
+        if mtype != "application/json":
+            return
+        try:
+            parsed = json.loads(response_body.decode())
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return
+        usage = parsed.get("usage")
+        if not isinstance(usage, dict):
+            return
+        pt = usage.get("prompt_tokens")
+        ctoks = usage.get("completion_tokens")
+        if isinstance(pt, int) and pt >= 0:
+            CHAT_PROMPT_TOKENS_TOTAL.labels(model=model).inc(pt)
+        if isinstance(ctoks, int) and ctoks >= 0:
+            CHAT_COMPLETION_TOKENS_TOTAL.labels(model=model).inc(ctoks)
+
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
             content = resp.read()
             headers = dict(resp.headers)
+            media_type = headers.get("Content-Type", "application/json")
+            _record_chat_metrics(content, resp.status, media_type)
             # Inject routing info into response headers for observability
             if routed:
                 headers["X-Routed-Model"] = model
@@ -193,7 +238,7 @@ async def chat_completions(request: Request) -> Response:
             return Response(
                 content=content,
                 status_code=resp.status,
-                media_type=headers.get("Content-Type", "application/json"),
+                media_type=media_type,
                 headers={
                     k: v
                     for k, v in headers.items()

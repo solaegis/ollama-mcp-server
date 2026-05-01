@@ -78,6 +78,7 @@ def test_chat_completions_auto_forwards_to_ollama(mock_urlopen: MagicMock) -> No
             "choices": [
                 {"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"},
             ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
     )
     r = client.post(
@@ -93,6 +94,13 @@ def test_chat_completions_auto_forwards_to_ollama(mock_urlopen: MagicMock) -> No
     assert "/v1/chat/completions" in getattr(call_args, "full_url", str(call_args))
     sent = json.loads(call_args.data.decode())
     assert sent["model"] != "auto"
+
+    m = client.get("/metrics")
+    assert m.status_code == 200
+    text = m.text
+    assert "router_chat_completions_total{" in text
+    assert "router_chat_completion_prompt_tokens_total{" in text
+    assert "router_chat_completion_completion_tokens_total{" in text
 
 
 @patch("router.server.urllib.request.urlopen")
