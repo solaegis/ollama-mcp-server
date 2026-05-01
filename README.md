@@ -131,8 +131,7 @@ Browse available models: https://ollama.com/library
 |---|---|---|
 | `qwen2.5-coder:7b` | Code completion, default | ~5 GB |
 | `qwen2.5-coder:14b` | Code + reasoning | ~10 GB |
-| `deepseek-coder:6.7b` | DeepSeek Coder; fits typical Docker Desktop RAM for `ollama` | ~4 GB |
-| `deepseek-coder:33b` | DeepSeek Coder; strong codegen (see Docker note below) | ~19 GB |
+| `deepseek-coder:33b` | DeepSeek Coder; strong codegen / architecture routing (see Docker note below) | ~19 GB |
 | `phi4:latest` | General, summarization, docs routing | ~9 GB |
 | `gemma4:latest` | Quick Q&A routing | ~10 GB |
 | `nomic-embed-text` | Embeddings | ~300 MB |
@@ -149,8 +148,7 @@ Official sizes on [ollama.com/library/deepseek-coder](https://ollama.com/library
 
 **Opt-in (`task up-container-ollama`):** the **`ollama`** service in [docker/compose.yaml](docker/compose.yaml) runs the **Linux** `ollama/ollama` image. On a Mac VM that is typically **CPU** inference (`GPULayers: []`, `CPU model buffer` in logs), not Metal. Do **not** run this alongside native Ollama on the same **11434** port.
 
-- **`deepseek-coder:33b`** often **fails to load** if the Docker VM / container cap is around **~16 GiB** (weights alone are on the order of ~18 GB on disk; the runner needs additional headroom). Raise **OrbStack / Docker Desktop → memory**, or stay on **native** Ollama for large models.
-- **`deepseek-coder:6.7b`** is a practical choice when the VM memory cap is tight.
+- **`deepseek-coder:33b`** often **fails to load** if the Docker VM / container cap is around **~16 GiB** (weights alone are on the order of ~18 GB on disk; the runner needs additional headroom). Raise **OrbStack / Docker Desktop → memory**, or stay on **native** Ollama for large models. If the VM memory cap is tight, prefer **`qwen2.5-coder:7b`** / **`14b`** instead of the largest DeepSeek tag.
 
 **Sample throughput (CPU inference in Docker container, 2026-05-01):** same prompts, `num_predict=280`, `temperature=0.2`, host `localhost:11434` → `ollama` container (not the default hybrid path).
 
@@ -158,10 +156,8 @@ Official sizes on [ollama.com/library/deepseek-coder](https://ollama.com/library
 |---|---|---:|---:|---:|
 | `qwen2.5-coder:14b` | Python `chunked` | 80 | 24.9 | 4.9 |
 | `qwen2.5-coder:14b` | Rust `Arc<Mutex<u64>>` counter | 134 | 29.3 | 4.8 |
-| `deepseek-coder:6.7b` | Python `chunked` | 254 | 33.7 | 8.9 |
-| `deepseek-coder:6.7b` | Rust `Arc<Mutex<u64>>` counter | 240 | 37.8 | 6.5 |
 
-*(DeepSeek hit the output cap more often in this run, so token counts are not identical; use the script pattern in `task` / `curl` / small Python client to reproduce on your machine.)*
+*(Use the script pattern in `task` / `curl` / small Python client to reproduce on your machine.)*
 
 ---
 
