@@ -1,5 +1,7 @@
 apiVersion: 1
 datasources:
+  # Omit uid: Grafana 12+ can fail provisioning ("data source not found") when uid
+  # conflicts with an existing grafana-data volume; panels bind via type + default DS.
   - name: Prometheus
     type: prometheus
     access: proxy

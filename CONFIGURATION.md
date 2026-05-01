@@ -18,6 +18,14 @@
 
 ---
 
+## Default stack (native Ollama on Mac)
+
+`task up` merges [docker/compose.hybrid-host.yaml](docker/compose.hybrid-host.yaml) so **router**, **Open WebUI**, **model-puller**, and **Prometheus** call **`http://host.docker.internal:11434`** (native Ollama on the host, Metal). The **`ollama` Docker service** is **off** unless you run **`task up-container-ollama`** (`--profile docker-ollama`).
+
+- **Breaking change** if you previously relied on `task up` to start the Linux `ollama` container: use **`task up-container-ollama`** and **`task down-container-ollama`**, and free host port **11434** for the container.
+
+---
+
 ## Claude Desktop Configuration
 
 ### Location
@@ -31,7 +39,8 @@
       "command": "node",
       "args": ["/Users/lvavasour/git/ollama-mcp-server/dist/index.js"],
       "env": {
-        "OLLAMA_BASE_URL": "http://localhost:11434"
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "ROUTER_BASE_URL": "http://localhost:4001"
       }
     }
   }
@@ -55,6 +64,7 @@ Open Antigravity → Settings → MCP Servers
 - **Args**: `/Users/lvavasour/git/ollama-mcp-server/dist/index.js`
 - **Environment Variables**:
   - `OLLAMA_BASE_URL=http://localhost:11434`
+  - `ROUTER_BASE_URL=http://localhost:4001`
 
 ---
 
@@ -71,7 +81,8 @@ Open Antigravity → Settings → MCP Servers
       "command": "node",
       "args": ["/Users/lvavasour/git/ollama-mcp-server/dist/index.js"],
       "env": {
-        "OLLAMA_BASE_URL": "http://localhost:11434"
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "ROUTER_BASE_URL": "http://localhost:4001"
       }
     }
   }
@@ -83,9 +94,14 @@ Open Antigravity → Settings → MCP Servers
 ## Environment Variables
 
 ### OLLAMA_BASE_URL
-- **Default**: `http://localhost:11434`
-- **Purpose**: Ollama API endpoint
+- **Default**: `http://localhost:11434` (native Ollama on the host for the default `task up` stack)
+- **Purpose**: Ollama API endpoint for MCP tools
 - **Custom Example**: `http://192.168.1.100:11434` (remote Ollama instance)
+
+### ROUTER_BASE_URL
+- **Default**: `http://localhost:4001` (smart router in Docker, published on host port 4001)
+- **Purpose**: MCP tools that call the OpenAI-compatible router use this base (no `/v1` suffix; see server code).
+- **OrbStack / SSRF**: optional `http://router.ollama-stack.orb.local:4001` — Cursor `setup-cursor` can set MCP to this when run with `OLLAMA_MCP_USE_ORB_DNS=1`.
 
 ---
 
@@ -174,14 +190,16 @@ To connect to multiple Ollama instances, add multiple server configs:
       "command": "node",
       "args": ["/Users/lvavasour/git/ollama-mcp-server/dist/index.js"],
       "env": {
-        "OLLAMA_BASE_URL": "http://localhost:11434"
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "ROUTER_BASE_URL": "http://localhost:4001"
       }
     },
     "ollama-remote": {
       "command": "node",
       "args": ["/Users/lvavasour/git/ollama-mcp-server/dist/index.js"],
       "env": {
-        "OLLAMA_BASE_URL": "http://192.168.1.100:11434"
+        "OLLAMA_BASE_URL": "http://192.168.1.100:11434",
+        "ROUTER_BASE_URL": "http://localhost:4001"
       }
     }
   }

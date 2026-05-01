@@ -1,9 +1,14 @@
 version: "3"
 
+# Applies to all tasks: hides go-task command echo lines. Child commands (npm, pytest)
+# still print their own stdout unless redirected. Set silent: false on a task to override.
 silent: true
 
 vars:
-  COMPOSE: docker compose -f docker/compose.yaml --env-file .env
+  # Default: native Ollama on host (Metal) + hybrid-host overrides (host.docker.internal).
+  COMPOSE: docker compose -f docker/compose.yaml -f docker/compose.hybrid-host.yaml --env-file .env
+  # Linux Ollama container only — do not merge hybrid-host (conflicts with native :11434).
+  COMPOSE_CONTAINER_OLLAMA: docker compose -f docker/compose.yaml --env-file .env --profile docker-ollama
   REPO_DIR:
     sh: pwd
   OLLAMA_URL: http://localhost:11434
@@ -14,74 +19,86 @@ vars:
 tasks:
   # ─── Default ──────────────────────────────────────────────────
   default:
-    silent: true
     desc: Show available tasks
     cmds: [task --list]
 
   # ─── MCP Server ───────────────────────────────────────────────
   build:
-    silent: true
     desc: Install deps and build TypeScript MCP server
     cmds:
       - npm install
       - npm run build
 
   inspect:
-    silent: true
     desc: Launch MCP Inspector (browser UI for testing tools interactively)
     deps: [build]
     cmds:
       - npm run inspect
 
   dev:
-    silent: true
     desc: Watch mode — rebuild on source changes
     cmds:
       - npm run dev
 
   # ─── Docker stack ─────────────────────────────────────────────
   up:
-    silent: true
-    desc: Start full stack (Ollama + Router + WebUI + metrics)
+    desc: Start stack (router, Web UI, metrics) using native Ollama on host :11434 — start Ollama.app/brew first
     cmds:
       - cp -n .env.example .env 2>/dev/null || true
       - "{{.COMPOSE}} up -d --remove-orphans"
       - task: _wait-ollama
       - task: status
 
-  update:
-    silent: true
-    desc: Pull latest Ollama image then restart the stack (run when Ollama is too old for new models)
+  up-container-ollama:
+    desc: Start stack with Linux Ollama in Docker (CPU in VM on Mac) — stop native Ollama or avoid port 11434 conflict
     cmds:
-      - "{{.COMPOSE}} pull ollama"
-      - "{{.COMPOSE}} up -d --remove-orphans ollama"
+      - cp -n .env.example .env 2>/dev/null || true
+      - "{{.COMPOSE_CONTAINER_OLLAMA}} up -d --remove-orphans"
       - task: _wait-ollama
-      - echo "Ollama updated. Run 'task pull -- <model>' to pull any missing models."
+      - task: status
+
+  update:
+    desc: Pull latest images for router, Web UI, Prometheus, Grafana (default stack; no container Ollama)
+    cmds:
+      - "{{.COMPOSE}} pull router open-webui prometheus grafana"
+      - "{{.COMPOSE}} up -d --remove-orphans"
+      - echo "Stack images updated. Native Ollama — upgrade via host (brew / Ollama.app)."
+
+  update-container-ollama:
+    desc: Pull latest ollama/ollama image and restart the ollama container (use with task up-container-ollama)
+    cmds:
+      - "{{.COMPOSE_CONTAINER_OLLAMA}} pull ollama"
+      - "{{.COMPOSE_CONTAINER_OLLAMA}} up -d --remove-orphans ollama"
+      - task: _wait-ollama
+      - echo "Container Ollama updated. Run 'task pull -- <model>' to pull any missing models."
 
   down:
-    silent: true
     desc: Stop stack (volumes preserved)
     cmds: ["{{.COMPOSE}} down"]
 
+  down-container-ollama:
+    desc: Stop stack started with task up-container-ollama (compose + docker-ollama profile)
+    cmds: ["{{.COMPOSE_CONTAINER_OLLAMA}} down"]
+
   restart:
-    silent: true
-    desc: "Restart a service: task restart -- router"
+    desc: "Restart a service: task restart -- router (ollama only exists with task up-container-ollama)"
     cmds: ["{{.COMPOSE}} restart {{.CLI_ARGS}}"]
 
   logs:
-    silent: true
     desc: "Follow logs: task logs -- ollama"
     cmds: ["{{.COMPOSE}} logs -f --tail=100 {{.CLI_ARGS}}"]
 
   status:
-    silent: true
     desc: Show running containers and service endpoints
     cmds:
       - "{{.COMPOSE}} ps"
       - |
         echo ""
+        echo "Stack mode: native Ollama on host (containers use host.docker.internal:11434)."
+        echo "  For Linux Ollama in Docker instead: task up-container-ollama"
+        echo ""
         echo "Endpoints (localhost):"
-        echo "  Ollama API     -> http://localhost:11434"
+        echo "  Ollama API     -> http://localhost:11434 (native on host)"
         echo "  Smart Router   -> http://localhost:4001"
         echo "  Chat UI        -> http://localhost:8080"
         echo "  Grafana        -> http://localhost:3001  (login: admin / admin)"
@@ -92,28 +109,33 @@ tasks:
         echo "  Smart Router   -> {{.ROUTER_ORB}}/v1"
 
   grafana:
-    silent: true
-    desc: Open Grafana in the browser
+    desc: Open Grafana in the browser (stack must be running — task up)
     cmds:
+      - |
+        if ! curl -sf --max-time 4 http://localhost:3001/api/health >/dev/null 2>&1; then
+          echo "Grafana is not reachable at http://localhost:3001"
+          echo "Start the stack: task up"
+          echo "If the stack is up but this persists: docker logs grafana --tail 50"
+          exit 1
+        fi
       - open http://localhost:3001
 
   reset:
-    silent: true
     desc: "Stop stack AND delete all volumes (destructive)"
     prompt: "Delete all model data and volumes? This cannot be undone."
     cmds: ["{{.COMPOSE}} down -v"]
 
   # ─── OrbStack hostname check ──────────────────────────────────
   orb-check:
-    silent: true
     desc: Verify OrbStack hostnames and container status
     cmds:
       - |
-        echo "=== Ollama ==="
+        echo "=== Ollama (native on host — default stack) ==="
         if curl -sf --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
           echo "OK  -> http://localhost:11434"
         else
-          echo "FAIL -> run: task up"
+          echo "FAIL -> start native Ollama on the host, then: task up"
+          echo "      (or use in-container Ollama: task up-container-ollama)"
         fi
         echo ""
         echo "=== Ollama OrbStack hostname ==="
@@ -144,7 +166,6 @@ tasks:
 
   # ─── Model management ─────────────────────────────────────────
   pull:
-    silent: true
     desc: "Pull a model: task pull -- gemma4:latest"
     cmds:
       - |
@@ -156,7 +177,7 @@ tasks:
         fi
         if ! curl -sf {{.OLLAMA_URL}}/api/tags >/dev/null 2>&1; then
           echo "ERROR: Ollama not reachable at {{.OLLAMA_URL}}"
-          echo "Run 'task up' first"
+          echo "Start native Ollama on the host, then run 'task up' (or use task up-container-ollama)"
           exit 1
         fi
         echo "Pulling $MODEL (this may take a while)..."
@@ -170,12 +191,11 @@ tasks:
         echo "Done: $MODEL"
 
   list:
-    silent: true
     desc: List all locally available models
     cmds:
       - |
         if ! curl -sf {{.OLLAMA_URL}}/api/tags >/dev/null 2>&1; then
-          echo "ERROR: Ollama not reachable at {{.OLLAMA_URL}} — run 'task up' first"
+          echo "ERROR: Ollama not reachable at {{.OLLAMA_URL}} — start native Ollama, then task up"
           exit 1
         fi
         curl -sf {{.OLLAMA_URL}}/api/tags \
@@ -196,12 +216,11 @@ tasks:
         "
 
   ps:
-    silent: true
     desc: Show models currently loaded in memory
     cmds:
       - |
         if ! curl -sf {{.OLLAMA_URL}}/api/tags >/dev/null 2>&1; then
-          echo "ERROR: Ollama not reachable at {{.OLLAMA_URL}} — run 'task up' first"
+          echo "ERROR: Ollama not reachable at {{.OLLAMA_URL}} — start native Ollama, then task up"
           exit 1
         fi
         curl -sf {{.OLLAMA_URL}}/api/ps \
@@ -221,7 +240,6 @@ tasks:
         "
 
   rm-model:
-    silent: true
     desc: "Delete a local model: task rm-model -- phi4:latest"
     cmds:
       - |
@@ -238,19 +256,16 @@ tasks:
 
   # ─── Smart router ─────────────────────────────────────────────
   router-test:
-    silent: true
     desc: "Test routing for a prompt: task router-test -- write a patent memo"
     cmds:
       - python3 scripts/router_test.py {{.CLI_ARGS}}
 
   router-models:
-    silent: true
     desc: Show the full routing table
     cmds:
       - python3 scripts/router_models.py
 
   router-dev:
-    silent: true
     desc: Run the smart router locally (outside Docker) for development
     cmds:
       - uv sync --group dev
@@ -260,7 +275,6 @@ tasks:
 
   # ─── VS Code extension ────────────────────────────────────────
   ext-install:
-    silent: true
     desc: Build, package, and install the extension into Cursor
     dir: vscode-extension
     cmds:
@@ -277,7 +291,6 @@ tasks:
         echo "Installed $VSIX into Cursor"
 
   ext-package:
-    silent: true
     desc: Package extension as .vsix only (no install)
     dir: vscode-extension
     cmds:
@@ -286,7 +299,6 @@ tasks:
       - npm run package
 
   ext-dev:
-    silent: true
     desc: Watch mode for extension TypeScript
     dir: vscode-extension
     cmds:
@@ -294,7 +306,6 @@ tasks:
 
   # ─── Automated tests (no Ollama required) ───────────────────
   test:
-    silent: true
     desc: Run ruff + pytest + npm build (uv sync --group dev)
     cmds:
       - uv sync --group dev
@@ -305,27 +316,23 @@ tasks:
 
   # ─── Quick tests ──────────────────────────────────────────────
   test-ollama:
-    silent: true
     desc: Smoke-test direct Ollama connection
     cmds:
       - task: list
 
   # ─── Setup helpers ────────────────────────────────────────────
   setup-cursor:
-    silent: true
-    desc: Write MCP + OpenAI provider config to Cursor settings
+    desc: Write MCP + OpenAI provider config to Cursor settings (optional OLLAMA_MCP_USE_ORB_DNS=1 for OrbStack router hostname in MCP)
     deps: [build]
     cmds:
       - python3 "{{.REPO_DIR}}/scripts/setup_cursor_config.py" "{{.REPO_DIR}}"
 
   sync-cursor-models:
-    silent: true
     desc: Write ~/.cursor/ollama-router-model-list.json and probe GET /v1/models (Cursor discovers models via API)
     cmds:
       - uv run python scripts/sync_cursor_models.py
 
   setup-claude-code:
-    silent: true
     desc: Register MCP server with Claude Code (user scope — available in all projects)
     deps: [build]
     cmds:
@@ -339,7 +346,6 @@ tasks:
         echo "Verify with: claude mcp list"
 
   setup-claude-desktop:
-    silent: true
     desc: Write MCP config to Claude Desktop config
     cmds:
       - |
@@ -364,7 +370,6 @@ tasks:
 
   # ─── Internal ─────────────────────────────────────────────────
   _wait-ollama:
-    silent: true
     internal: true
     cmds:
       - |
@@ -377,6 +382,7 @@ tasks:
           echo "  attempt $i/30..."
           sleep 3
         done
-        echo "ERROR: Ollama did not become ready after 90s"
-        docker logs ollama --tail 20
+        echo "ERROR: Ollama did not become ready after 90s (expected at {{.OLLAMA_URL}})"
+        docker logs ollama --tail 20 2>/dev/null || true
+        echo "If using native Ollama: ensure it is running on the host (Ollama.app or brew services)."
         exit 1

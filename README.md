@@ -7,7 +7,7 @@ Local LLM stack for Mac — Ollama runtime, OpenAI-compatible proxy, MCP server 
 | Component | Purpose |
 |---|---|
 | **MCP server** (`src/`) | Exposes Ollama tools to any MCP client: list, generate, chat, embeddings |
-| **Docker stack** (`docker/`) | Ollama + smart router + Open WebUI + Prometheus + Grafana |
+| **Docker stack** (`docker/`) | Smart router + Open WebUI + Prometheus + Grafana; **default** uses **native** Ollama on the host (Metal). Optional **Linux Ollama** container via `task up-container-ollama`. |
 | **VS Code extension** (`vscode-extension/`) | Status bar, model picker, send/rewrite selection, chat panel |
 | **Taskfile** | One-command lifecycle for all of the above |
 
@@ -29,11 +29,12 @@ brew install node
 
 # Python 3 (already on macOS, but ensure it's on PATH)
 python3 --version   # should be 3.10+
+
+# Ollama (native on macOS — Metal). Default `task up` uses this; containers reach it via host.docker.internal.
+brew install ollama
+# or install from https://ollama.com/download and keep the app running
 ```
 
-Ollama itself runs inside the Docker stack — no host install needed.
-
----
 
 ## Quick start
 
@@ -46,8 +47,8 @@ task build
 # 2. Copy and edit environment (change keys, adjust default models)
 cp .env.example .env
 
-# 3. Start the full Docker stack
-#    Pulls default models automatically on first run
+# 3. Start native Ollama on the host (menu bar app or `ollama serve`), then start the Docker stack
+#    (router, Web UI, metrics — pulls default models into native Ollama on first run)
 task up
 
 # 4. Verify everything
@@ -63,9 +64,11 @@ task setup-claude-desktop
 
 ### Service endpoints after `task up`
 
+Default stack: **Ollama runs on the Mac host** (`localhost:11434`, Metal). Compose services use `host.docker.internal:11434` to reach it. For a **Linux Ollama container** instead (CPU in a VM on Mac), use **`task up-container-ollama`** and stop native Ollama to avoid port **11434** conflicts.
+
 | Service | URL | Purpose |
 |---|---|---|
-| Ollama API | `http://localhost:11434` | Direct model API |
+| Ollama API | `http://localhost:11434` | Native Ollama on host (default) |
 | Smart router | `http://localhost:4001` | OpenAI-compatible + classifier → Ollama; **use this for Cursor / Commit Sage** |
 | Open WebUI | `http://localhost:8080` | Browser chat UI |
 | Grafana | `http://localhost:3001` | Usage metrics |
@@ -105,11 +108,37 @@ Browse available models: https://ollama.com/library
 |---|---|---|
 | `qwen2.5-coder:7b` | Code completion, default | ~5 GB |
 | `qwen2.5-coder:14b` | Code + reasoning | ~10 GB |
+| `deepseek-coder:6.7b` | DeepSeek Coder; fits typical Docker Desktop RAM for `ollama` | ~4 GB |
+| `deepseek-coder:33b` | DeepSeek Coder; strong codegen (see Docker note below) | ~19 GB |
 | `phi4:latest` | General, fast | ~9 GB |
 | `llama3.3:70b` | Deep reasoning | ~45 GB |
 | `nomic-embed-text` | Embeddings | ~300 MB |
 
-All four can be loaded simultaneously on the M2 Ultra.
+Several of these can be loaded simultaneously on the M2 Ultra when Ollama has access to the full machine (native install or a container with a high memory limit).
+
+#### DeepSeek Coder (library tags)
+
+Official sizes on [ollama.com/library/deepseek-coder](https://ollama.com/library/deepseek-coder): `deepseek-coder` / `:1.3b`, `:6.7b`, `:33b` (16K context).
+
+#### Docker Ollama on Apple Silicon vs native (Metal)
+
+**Default (`task up`):** inference uses **native Ollama** on the host; the compose **`ollama` service is off**. Router, Open WebUI, model-puller, and Prometheus reach the host via **`host.docker.internal:11434`** (see [docker/compose.hybrid-host.yaml](docker/compose.hybrid-host.yaml)).
+
+**Opt-in (`task up-container-ollama`):** the **`ollama`** service in [docker/compose.yaml](docker/compose.yaml) runs the **Linux** `ollama/ollama` image. On a Mac VM that is typically **CPU** inference (`GPULayers: []`, `CPU model buffer` in logs), not Metal. Do **not** run this alongside native Ollama on the same **11434** port.
+
+- **`deepseek-coder:33b`** often **fails to load** if the Docker VM / container cap is around **~16 GiB** (weights alone are on the order of ~18 GB on disk; the runner needs additional headroom). Raise **OrbStack / Docker Desktop → memory**, or stay on **native** Ollama for large models.
+- **`deepseek-coder:6.7b`** is a practical choice when the VM memory cap is tight.
+
+**Sample throughput (CPU inference in Docker container, 2026-05-01):** same prompts, `num_predict=280`, `temperature=0.2`, host `localhost:11434` → `ollama` container (not the default hybrid path).
+
+| Model | Task | Output tokens (eval) | Wall (s) | eval tok/s (approx.) |
+|---|---|---:|---:|---:|
+| `qwen2.5-coder:14b` | Python `chunked` | 80 | 24.9 | 4.9 |
+| `qwen2.5-coder:14b` | Rust `Arc<Mutex<u64>>` counter | 134 | 29.3 | 4.8 |
+| `deepseek-coder:6.7b` | Python `chunked` | 254 | 33.7 | 8.9 |
+| `deepseek-coder:6.7b` | Rust `Arc<Mutex<u64>>` counter | 240 | 37.8 | 6.5 |
+
+*(DeepSeek hit the output cap more often in this run, so token counts are not identical; use the script pattern in `task` / `curl` / small Python client to reproduce on your machine.)*
 
 ---
 
@@ -117,7 +146,7 @@ All four can be loaded simultaneously on the M2 Ultra.
 
 ### Cursor
 
-`task setup-cursor` writes the MCP config automatically. To do it manually:
+`task setup-cursor` writes the MCP config automatically. Optional: `OLLAMA_MCP_USE_ORB_DNS=1 task setup-cursor` sets MCP **`ROUTER_BASE_URL`** to `http://router.ollama-stack.orb.local:4001` (same hostname family as the OpenAI override). To do it manually:
 
 `~/.cursor/mcp.json`:
 ```json
@@ -173,7 +202,7 @@ Settings → AI Providers → Add Custom:
 Settings → MCP Servers → Add:
 - Command: `node`
 - Args: `/Users/lvavasour/git/solaegis/ollama-mcp-server/dist/index.js`
-- Env: `OLLAMA_BASE_URL=http://localhost:11434`
+- Env: `OLLAMA_BASE_URL=http://localhost:11434`, `ROUTER_BASE_URL=http://localhost:4001`
 
 ### Claude Desktop
 
@@ -263,8 +292,12 @@ Edit [`router/classifier.py`](router/classifier.py) (`ROUTES` and routing logic)
 ```bash
 task build              # install npm deps + compile MCP server TypeScript
 task inspect            # launch MCP Inspector (browser UI for testing tools)
-task up                 # start full Docker stack
-task down               # stop stack (volumes kept)
+task up                       # start stack (native Ollama on host :11434)
+task up-container-ollama      # optional: Linux Ollama in Docker instead (stop native first)
+task down                     # stop default stack
+task down-container-ollama    # stop stack started with up-container-ollama
+task update                   # pull router, Web UI, Prometheus, Grafana images
+task update-container-ollama  # pull/restart ollama/ollama container (with up-container-ollama)
 task restart -- <svc>   # restart one service
 task logs -- <svc>      # follow logs
 task status             # show containers + endpoints
@@ -288,8 +321,11 @@ task ext-dev            # watch mode for extension TS
 
 **Ollama not reachable**
 ```bash
+# Default: ensure native Ollama is running on the host (port 11434), then task up
+curl -sf http://localhost:11434/api/tags
+
+# If you use task up-container-ollama instead:
 task logs -- ollama
-# Usually: model still loading, or port conflict on 11434
 ```
 
 **Smart router not reachable**

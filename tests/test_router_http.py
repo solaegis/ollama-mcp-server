@@ -20,6 +20,13 @@ def test_health() -> None:
     assert "ollama" in body
 
 
+def test_metrics_prometheus_format() -> None:
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    assert "http_requests_total" in r.text
+    assert r.headers.get("content-type", "").startswith("text/plain")
+
+
 def test_models_lists_routes() -> None:
     r = client.get("/models")
     assert r.status_code == 200

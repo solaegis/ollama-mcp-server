@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import sys
 
 # Cursor OpenAI override requires a non-empty API key; router ignores Bearer validation.
 CURSOR_OPENAI_PLACEHOLDER_KEY = "sk-local-dev-key"
 ROUTER_ORB_BASE = "http://router.ollama-stack.orb.local:4001/v1"
+# MCP uses ROUTER_BASE_URL without /v1 (see src/index.ts).
+ROUTER_ORB_MCP = "http://router.ollama-stack.orb.local:4001"
 
 
 def main() -> None:
@@ -25,12 +28,13 @@ def main() -> None:
     mcp_path = pathlib.Path.home() / ".cursor" / "mcp.json"
     mcp_path.parent.mkdir(parents=True, exist_ok=True)
     mcp = json.loads(mcp_path.read_text()) if mcp_path.exists() else {}
+    router_mcp = ROUTER_ORB_MCP if os.environ.get("OLLAMA_MCP_USE_ORB_DNS") else "http://localhost:4001"
     mcp.setdefault("mcpServers", {})["ollama"] = {
         "command": "node",
         "args": [str(dist)],
         "env": {
             "OLLAMA_BASE_URL": "http://localhost:11434",
-            "ROUTER_BASE_URL": "http://localhost:4001",
+            "ROUTER_BASE_URL": router_mcp,
         },
     }
     mcp_path.write_text(json.dumps(mcp, indent=2))

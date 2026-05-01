@@ -13,6 +13,7 @@ Endpoints:
   GET  /v1/models             Synthetic OpenAI model list (used by Cursor discovery).
   POST /route                 Classification only — returns model + reason, no LLM call.
   GET  /health                Health check.
+  GET  /metrics               Prometheus metrics for the router process.
   GET  /models                Router routing table (not OpenAI format).
 
 Run:
@@ -32,6 +33,7 @@ import urllib.request
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from .classifier import ROUTES, route
 
@@ -52,6 +54,12 @@ OPENAI_ALIAS_MAP: dict[str, str] = {
 }
 
 app = FastAPI(title="Ollama Smart Router", version="1.0.0")
+
+Instrumentator(
+    excluded_handlers=["/health", "/metrics"],
+    should_group_status_codes=False,
+    should_instrument_requests_inprogress=True,
+).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 
 # ─── Health ───────────────────────────────────────────────────────────────
