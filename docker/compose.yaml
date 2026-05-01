@@ -84,7 +84,7 @@ services:
     restart: "no"
     networks: [ollama-net]
     environment:
-      - MODELS=${DEFAULT_MODELS:-qwen2.5-coder:7b,nomic-embed-text:latest,gemma4:latest,phi4:latest,qwen2.5-coder:14b,deepseek-coder:6.7b,deepseek-coder:33b}
+      - MODELS=${DEFAULT_MODELS:-qwen2.5-coder:7b,nomic-embed-text:latest,gemma4:latest,phi4:latest,qwen2.5-coder:14b,deepseek-coder:33b}
       - OLLAMA_PULL_BASE=http://ollama:11434
     entrypoint:
       - sh

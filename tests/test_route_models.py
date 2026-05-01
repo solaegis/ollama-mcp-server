@@ -8,7 +8,6 @@ KNOWN_OLLAMA_MODELS = {
     "qwen2.5-coder:14b",
     "qwen2.5-coder:7b",
     "deepseek-coder:33b",
-    "deepseek-coder:6.7b",
     "gemma4:latest",
     "phi4:latest",
     "nomic-embed-text:latest",
