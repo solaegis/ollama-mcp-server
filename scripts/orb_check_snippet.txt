@@ -3,38 +3,28 @@
     desc: Verify OrbStack hostnames are reachable (use these in Cursor)
     cmds:
       - |
-        echo "Checking OrbStack hostnames..."
-        echo ""
-
-        # LiteLLM
-        if curl -sf --max-time 3 {{.LITELLM_ORB}}/health/liveliness >/dev/null 2>&1; then
-          echo "LiteLLM OK  -> {{.LITELLM_ORB}}/v1  (use this in Cursor)"
+        echo "=== Ollama ==="
+        if curl -sf --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
+          echo "Ollama OK  -> http://localhost:11434"
         else
-          echo "LiteLLM FAIL -> stack may not be running: task up"
+          echo "Ollama FAIL -> stack may not be running: task up"
         fi
-
         echo ""
-        echo "Router container status:"
-        docker inspect ollama-router --format "  name={{.Name}} hostname={{.Config.Hostname}} status={{.State.Status}}" 2>/dev/null || echo "  container not found"
-
-        echo ""
-        echo "Trying router hostname variants..."
+        echo "=== Smart router (OrbStack hostnames) ==="
         for host in \
           "ollama-router.ollama-stack.orb.local" \
           "router.ollama-stack.orb.local" \
           "ollama-router.orb.local"; do
           if curl -sf --max-time 2 "http://${host}:4001/health" >/dev/null 2>&1; then
-            echo "  REACHABLE -> http://${host}:4001"
+            echo "Router OK  -> http://${host}:4001/v1  (use this base + /v1 in Cursor)"
           else
-            echo "  unreachable -> http://${host}:4001"
+            echo "Router --     http://${host}:4001"
           fi
         done
-
         echo ""
         echo "Localhost fallback (works for task router-test, not Cursor):"
         if curl -sf --max-time 2 "http://localhost:4001/health" >/dev/null 2>&1; then
           echo "  OK -> http://localhost:4001"
         else
-          echo "  FAIL -> router not running or unhealthy"
-          echo "  Try: task restart -- router && sleep 15 && task orb-check"
+          echo "  FAIL -> http://localhost:4001"
         fi

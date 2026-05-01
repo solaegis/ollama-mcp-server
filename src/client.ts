@@ -74,18 +74,20 @@ export class OllamaClient {
 
 // ─── Router client — talks to the smart router on port 4001 ───────────────
 // Uses the OpenAI-compatible /v1/chat/completions endpoint.
+// baseUrl is the router origin only (e.g. http://localhost:4001) — no /v1 suffix;
+// paths /v1/chat/completions and /route are appended below.
 // Send model="auto" to let the router pick the best model for the content.
 
 export class RouterClient {
   private baseUrl: string;
-  private apiKey: string;
+  private bearerToken: string;
 
   constructor(
     baseUrl: string = 'http://localhost:4001',
-    apiKey: string = 'sk-local-dev-key'
+    bearerToken: string = 'sk-local-dev-key'
   ) {
     this.baseUrl = baseUrl;
-    this.apiKey = apiKey;
+    this.bearerToken = bearerToken;
   }
 
   private async request<T>(
@@ -98,7 +100,7 @@ export class RouterClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
+          'Authorization': `Bearer ${this.bearerToken}`,
         },
         body: JSON.stringify(body),
       });
@@ -137,7 +139,7 @@ export class RouterClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
+        'Authorization': `Bearer ${this.bearerToken}`,
       },
       body: JSON.stringify({ messages }),
     });

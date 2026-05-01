@@ -3,26 +3,23 @@
     desc: Verify OrbStack hostnames and container status
     cmds:
       - |
-        echo "=== LiteLLM ==="
-        if curl -sf --max-time 3 {{.LITELLM_ORB}}/health/liveliness >/dev/null 2>&1; then
-          echo "OK  -> {{.LITELLM_ORB}}/v1  (configured in Cursor)"
+        echo "=== Ollama ==="
+        if curl -sf --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
+          echo "OK  -> http://localhost:11434"
         else
           echo "FAIL -> run: task up"
         fi
         echo ""
-        echo "=== Router container ==="
-        docker inspect ollama-router --format "  status={{.State.Status}} healthy={{.State.Health.Status}}" 2>/dev/null || echo "  not found - run: task up"
-        echo ""
-        echo "=== Router hostname variants ==="
+        echo "=== Smart router (OrbStack) ==="
         for host in "ollama-router.ollama-stack.orb.local" "router.ollama-stack.orb.local" "ollama-router.orb.local"; do
           if curl -sf --max-time 2 "http://${host}:4001/health" >/dev/null 2>&1; then
-            echo "  OK  -> http://${host}:4001"
+            echo "  OK  -> http://${host}:4001/v1"
           else
             echo "  --     http://${host}:4001"
           fi
         done
         echo ""
-        echo "=== Localhost (task router-test uses this) ==="
+        echo "=== Localhost ==="
         if curl -sf --max-time 2 "http://localhost:4001/health" >/dev/null 2>&1; then
           echo "  OK  -> http://localhost:4001"
         else

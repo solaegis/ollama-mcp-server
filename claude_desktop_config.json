@@ -4,7 +4,8 @@
       "command": "node",
       "args": ["/Users/lvavasour/git/solaegis/ollama-mcp-server/dist/index.js"],
       "env": {
-        "OLLAMA_BASE_URL": "http://localhost:11434"
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "ROUTER_BASE_URL": "http://localhost:4001"
       }
     }
   }

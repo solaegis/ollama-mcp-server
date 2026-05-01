@@ -28,7 +28,6 @@
     cmds:
       - uv sync --group dev
       - |
-        LITELLM_BASE_URL=http://localhost:4000 \
-        LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-dev-key} \
+        OLLAMA_BASE_URL=http://localhost:11434 \
         uv run uvicorn router.server:app --port 4001 --reload
 

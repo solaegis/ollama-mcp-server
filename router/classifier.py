@@ -2,18 +2,20 @@
 router/classifier.py — Smart model router for the ollama-mcp-server stack.
 
 Classifies an incoming chat request and returns the best local model for it.
-Uses the LiteLLM alias names from config/litellm.yaml (no colons — colons
-are YAML special characters and cause parse failures in model_name fields).
+Uses Ollama native model names (with colons, e.g. "qwen2.5-coder:14b") which
+are passed directly to Ollama's OpenAI-compatible API at /v1/chat/completions.
+Misclassification sends traffic to a suboptimal model (quality/latency); use
+POST /route on the router to debug routing without invoking the LLM.
 
-Model assignments (tuned for Nuvent / Rust / IaC workloads):
-  git_commit     → qwen2.5-coder-14b   Diffs, conventional commits, Commit Sage
-  summarization  → gemma4-27b           Long-context summaries, PRs, changelogs
-  rust_code      → qwen2.5-coder-14b   Best Rust on Polyglot benchmark
-  general_code   → qwen2.5-coder-7b    Fast, good enough for completions
-  architecture   → gemma4-27b           256K context, strong reasoning
-  docs_writing   → llama3.3-70b         Best local prose generation
-  quick_qa       → gemma4               Fast, 128K context
-  default        → qwen2.5-coder-7b    Safe fallback
+Model assignments (aligned with typical pulled sets: qwen2.5-coder, deepseek-coder, phi4, gemma4):
+  git_commit     → qwen2.5-coder:14b   Diffs, conventional commits, Commit Sage
+  summarization  → phi4:latest         Long-context summaries, PRs, changelogs
+  rust_code      → qwen2.5-coder:14b   Strong codegen
+  general_code   → qwen2.5-coder:7b    Fast, good enough for completions
+  architecture   → deepseek-coder:33b  System design / tradeoffs (needs ~19GB+ headroom)
+  docs_writing   → phi4:latest        Documentation and prose
+  quick_qa       → gemma4:latest       Fast Q&A
+  default        → qwen2.5-coder:7b    Safe fallback
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 # ─── Model routing table ──────────────────────────────────────────────────
-# Names must match model_name entries in config/litellm.yaml exactly.
+# Models are Ollama-native names (name:tag); router forwards to Ollama /v1/chat/completions.
 
 
 @dataclass(frozen=True)
@@ -36,42 +38,42 @@ class Route:
 ROUTES: dict[str, Route] = {
     "git_commit": Route(
         "git_commit",
-        "qwen2.5-coder-14b",
+        "qwen2.5-coder:14b",
         "Git commit message, diff, or conventional commit",
     ),
     "summarization": Route(
         "summarization",
-        "gemma4-27b",
+        "phi4:latest",
         "Summarization, recap, PR/changelog/standup text",
     ),
     "rust_code": Route(
         "rust_code",
-        "qwen2.5-coder-14b",
+        "qwen2.5-coder:14b",
         "Rust implementation task",
     ),
     "general_code": Route(
         "general_code",
-        "qwen2.5-coder-7b",
+        "qwen2.5-coder:7b",
         "General code task",
     ),
     "architecture": Route(
         "architecture",
-        "gemma4-27b",
+        "deepseek-coder:33b",
         "Architecture/design reasoning",
     ),
     "docs_writing": Route(
         "docs_writing",
-        "llama3.3-70b",
+        "phi4:latest",
         "Documentation/prose writing",
     ),
     "quick_qa": Route(
         "quick_qa",
-        "gemma4",
+        "gemma4:latest",
         "Quick Q&A or explanation",
     ),
     "default": Route(
         "default",
-        "qwen2.5-coder-7b",
+        "qwen2.5-coder:7b",
         "Default fallback",
     ),
 }
@@ -81,7 +83,7 @@ ROUTES: dict[str, Route] = {
 # Commit-style prompts are checked first so a Rust-heavy diff still routes to
 # git_commit (commit message) rather than rust_code (implementation).
 # Summarization is checked next so "summarize this Rust code" prefers long-context
-# gemma4-27b over rust_code.
+# phi4 over rust_code.
 
 COMMIT_SIGNALS = re.compile(
     r"(diff\s+--git|git\s+diff\b|^\s*@@\s|^\+\+\+\s+[ab]/|^---\s+[ab]/|^\s*index\s+[0-9a-f]{7,}\b|"
@@ -172,6 +174,6 @@ def classify(messages: Sequence[dict]) -> Route:
 
 
 def route(messages: Sequence[dict]) -> tuple[str, str, str]:
-    """Return (lite_llm_model_name, human_reason, route_key)."""
+    """Return (ollama_model_name, human_reason, route_key)."""
     r = classify(messages)
     return r.model, r.reason, r.key

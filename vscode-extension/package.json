@@ -42,22 +42,22 @@
         "ollama.baseUrl": {
           "type": "string",
           "default": "http://localhost:11434",
-          "description": "Ollama API base URL"
+          "description": "Ollama API origin (scheme + host + port only, e.g. http://localhost:11434 — no path)."
         },
-        "ollama.litellmUrl": {
+        "ollama.routerUrl": {
           "type": "string",
-          "default": "http://litellm.ollama-stack.orb.local:4000",
-          "description": "LiteLLM proxy URL (OrbStack hostname avoids Cursor SSRF block)"
+          "default": "http://localhost:4001",
+          "description": "Smart router origin only (no /v1). GET /v1/models from the router is synthetic; use ollama list for pulled models. OrbStack: http://router.ollama-stack.orb.local:4001 if localhost is blocked."
         },
-        "ollama.litellmKey": {
+        "ollama.routerBearerToken": {
           "type": "string",
           "default": "sk-local-dev-key",
-          "description": "LiteLLM master key"
+          "description": "Bearer token sent to the router (placeholder; router does not validate)"
         },
         "ollama.defaultModel": {
           "type": "string",
           "default": "qwen2.5-coder-7b",
-          "description": "Default model — must match a model_name in config/litellm.yaml"
+          "description": "Default Ollama model id (name:tag)"
         },
         "ollama.temperature": {
           "type": "number",

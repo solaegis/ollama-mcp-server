@@ -1,4 +1,4 @@
-"""Unit tests for router.classifier — no network, no LiteLLM."""
+"""Unit tests for router.classifier — no network."""
 
 from __future__ import annotations
 
