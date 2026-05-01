@@ -33,32 +33,6 @@ services:
       retries: 20
       start_period: 15s
 
-  # ─── OpenAI-Compatible Proxy ──────────────────────────────────
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: litellm
-    restart: unless-stopped
-    networks: [ollama-net]
-    ports:
-      - "4000:4000"
-    volumes:
-      - ../config/litellm.yaml:/app/config.yaml:ro
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-    environment:
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-dev-key}
-      - OLLAMA_BASE_URL=http://ollama:11434
-    depends_on:
-      ollama:
-        condition: service_healthy
-    # TCP port check — avoids the image's built-in /health endpoint
-    # which requires auth and would return 401 with a master key set.
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4000' 2>/dev/null && exit 0 || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 24
-      start_period: 60s
-
   # ─── Smart Router ─────────────────────────────────────────────
   router:
     image: python:3.12-slim
@@ -77,10 +51,9 @@ services:
              uv sync --frozen --no-dev &&
              uv run uvicorn router.server:app --host 0.0.0.0 --port 4001"
     environment:
-      - LITELLM_BASE_URL=http://litellm:4000
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-dev-key}
+      - OLLAMA_BASE_URL=http://ollama:11434
     depends_on:
-      litellm:
+      ollama:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4001' 2>/dev/null && exit 0 || exit 1"]

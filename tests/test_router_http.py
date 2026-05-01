@@ -17,7 +17,7 @@ def test_health() -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert "litellm" in body
+    assert "ollama" in body
 
 
 def test_models_lists_routes() -> None:
@@ -28,19 +28,15 @@ def test_models_lists_routes() -> None:
     assert "git_commit" in data["routing_table"]
 
 
-@patch("router.server.urllib.request.urlopen")
-def test_v1_models_proxies_to_litellm(mock_urlopen: MagicMock) -> None:
-    mock_urlopen.return_value = _mock_urlopen_response(
-        {"object": "list", "data": [{"id": "qwen2.5-coder-7b", "object": "model"}]}
-    )
+def test_v1_models_returns_synthetic_list() -> None:
     r = client.get("/v1/models")
     assert r.status_code == 200
     body = r.json()
     assert body["object"] == "list"
-    assert body["data"][0]["id"] == "qwen2.5-coder-7b"
-    mock_urlopen.assert_called_once()
-    call_args = mock_urlopen.call_args[0][0]
-    assert "/v1/models" in getattr(call_args, "full_url", str(call_args))
+    assert len(body["data"]) > 0
+    ids = {m["id"] for m in body["data"]}
+    assert "auto" in ids
+    assert "qwen2.5-coder:14b" in ids
 
 
 def test_route_endpoint() -> None:
@@ -50,7 +46,7 @@ def test_route_endpoint() -> None:
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["model"] == "qwen2.5-coder-14b"
+    assert body["model"] == "qwen2.5-coder:14b"
     assert body["route_key"] == "git_commit"
 
 
@@ -93,7 +89,7 @@ def test_chat_completions_auto_forwards_to_litellm(mock_urlopen: MagicMock) -> N
 
 
 @patch("router.server.urllib.request.urlopen")
-def test_chat_completions_litellm_unreachable(mock_urlopen: MagicMock) -> None:
+def test_chat_completions_ollama_unreachable(mock_urlopen: MagicMock) -> None:
     import urllib.error
 
     mock_urlopen.side_effect = urllib.error.URLError("refused")
@@ -102,7 +98,7 @@ def test_chat_completions_litellm_unreachable(mock_urlopen: MagicMock) -> None:
         json={"model": "auto", "messages": [{"role": "user", "content": "hi"}]},
     )
     assert r.status_code == 502
-    assert "LiteLLM" in r.json()["error"]
+    assert "Ollama" in r.json()["error"]
 
 
 @patch("router.server.urllib.request.urlopen")

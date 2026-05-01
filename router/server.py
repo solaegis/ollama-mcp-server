@@ -1,13 +1,16 @@
 """
 router/server.py — Thin FastAPI service wrapping the classifier.
 
-Sits in front of LiteLLM as a pre-routing layer. Clients (Cursor, Claude,
+Sits in front of Ollama as a pre-routing layer. Clients (Cursor, Claude,
 VS Code extension) can optionally POST to /route to get a model recommendation,
 or just use the /v1/chat/completions passthrough which auto-selects the model.
 
+Requests are forwarded directly to Ollama's OpenAI-compatible API
+(/v1/chat/completions) — LiteLLM is not used.
+
 Endpoints:
-  POST /v1/chat/completions   OpenAI-compatible. Auto-routes then proxies to LiteLLM.
-  GET  /v1/models             OpenAI model list (proxied from LiteLLM; used by Cursor discovery).
+  POST /v1/chat/completions   OpenAI-compatible. Auto-routes then proxies to Ollama.
+  GET  /v1/models             Synthetic OpenAI model list (used by Cursor discovery).
   POST /route                 Classification only — returns model + reason, no LLM call.
   GET  /health                Health check.
   GET  /models                Router routing table (not OpenAI format).
@@ -23,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 
@@ -31,11 +35,21 @@ from fastapi.responses import JSONResponse
 
 from .classifier import ROUTES, route
 
-LITELLM_URL = os.environ.get("LITELLM_BASE_URL", "http://localhost:4000")
-LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "sk-local-dev-key")
+OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
-# Force git-commit model (LiteLLM model_name) without classifier.
+# Force git-commit model without classifier.
 FORCE_COMMIT_MODEL_IDS = frozenset({"commit", "commit-sage", "git-commit"})
+
+# Map OpenAI-compatible model names to Ollama native names.
+# These are aliases Cursor and other OpenAI clients send when configured
+# to use this router as a drop-in OpenAI provider.
+OPENAI_ALIAS_MAP: dict[str, str] = {
+    "gpt-4o": "qwen2.5-coder:7b",
+    "gpt-4": "qwen2.5-coder:14b",
+    "gpt-4o-mini": "phi4:latest",
+    "gpt-3.5-turbo": "qwen2.5-coder:7b",
+    "text-davinci-003": "qwen2.5-coder:7b",
+}
 
 app = FastAPI(title="Ollama Smart Router", version="1.0.0")
 
@@ -45,41 +59,43 @@ app = FastAPI(title="Ollama Smart Router", version="1.0.0")
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "litellm": LITELLM_URL}
+    return {"status": "ok", "ollama": OLLAMA_URL}
 
 
-# ─── OpenAI-compatible model list (for Cursor / clients that call GET /v1/models) ─
+# ─── Synthetic OpenAI-compatible model list ───────────────────────────────
 
 
 @app.get("/v1/models")
-def openai_models_list() -> Response:
-    """Proxy LiteLLM's /v1/models so clients using this base URL can discover model IDs."""
-    req = urllib.request.Request(
-        f"{LITELLM_URL}/v1/models",
-        headers={"Authorization": f"Bearer {LITELLM_KEY}"},
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            content = resp.read()
-            headers = dict(resp.headers)
-            return Response(
-                content=content,
-                status_code=resp.status,
-                media_type=headers.get("Content-Type", "application/json"),
-                headers={
-                    k: v
-                    for k, v in headers.items()
-                    if k.lower() not in ("transfer-encoding", "connection")
-                },
-            )
-    except urllib.error.HTTPError as e:
-        return Response(content=e.read(), status_code=e.code, media_type="application/json")
-    except urllib.error.URLError as e:
-        return JSONResponse(
-            {"error": f"Cannot reach LiteLLM at {LITELLM_URL}: {e.reason}"},
-            status_code=502,
-        )
+def openai_models_list() -> JSONResponse:
+    """Return a synthetic OpenAI-compatible model list.
+
+    Cursor and other OpenAI-compatible clients call GET /v1/models to discover
+    available model IDs. We build this list from ROUTES (Ollama native names),
+    OPENAI_ALIAS_MAP, and router shortcuts — no outbound HTTP call needed.
+    """
+    seen: set[str] = set()
+    model_ids: list[str] = []
+
+    for shortcut in ("auto", "router", "commit", "commit-sage", "git-commit"):
+        if shortcut not in seen:
+            seen.add(shortcut)
+            model_ids.append(shortcut)
+
+    for r in ROUTES.values():
+        if r.model not in seen:
+            seen.add(r.model)
+            model_ids.append(r.model)
+
+    for alias in OPENAI_ALIAS_MAP:
+        if alias not in seen:
+            seen.add(alias)
+            model_ids.append(alias)
+
+    now = int(time.time())
+    data = [
+        {"id": mid, "object": "model", "created": now, "owned_by": "ollama"} for mid in model_ids
+    ]
+    return JSONResponse({"object": "list", "data": data})
 
 
 # ─── Model map (router-specific) ───────────────────────────────────────────
@@ -116,9 +132,9 @@ async def chat_completions(request: Request) -> Response:
 
     If the client sends model="auto", the router picks the model.
     Models "commit", "commit-sage", "git-commit" force the git_commit model.
-    Model "gpt-3.5-turbo" uses the classifier when the route is git_commit
-    (Commit Sage default); otherwise passes through to LiteLLM alias.
-    Any other explicit model name is passed through unchanged.
+    OpenAI alias names (gpt-4o, gpt-3.5-turbo, etc.) are translated to Ollama
+    native model names via OPENAI_ALIAS_MAP. Any other explicit model name is
+    passed through unchanged.
     """
     body = await request.json()
     messages = body.get("messages", [])
@@ -135,33 +151,21 @@ async def chat_completions(request: Request) -> Response:
         model, reason, route_key = route(messages)
         body["model"] = model
         routed = True
-    elif requested_model == "gpt-3.5-turbo":
-        model_c, reason_c, route_key_c = route(messages)
-        if route_key_c == "git_commit":
-            body["model"] = model_c
-            model = model_c
-            reason = reason_c
-            route_key = route_key_c
-            routed = True
-        else:
-            model = requested_model
-            reason = "explicit"
-            route_key = "passthrough"
-            routed = False
     else:
-        model = requested_model
-        reason = "explicit"
-        route_key = "explicit"
-        routed = False
+        translated = OPENAI_ALIAS_MAP.get(requested_model, requested_model)
+        body["model"] = translated
+        model = translated
+        reason = "alias" if translated != requested_model else "explicit"
+        route_key = "alias" if translated != requested_model else "explicit"
+        routed = translated != requested_model
 
-    # Forward to LiteLLM
+    # Forward to Ollama
     payload = json.dumps(body).encode()
     req = urllib.request.Request(
-        f"{LITELLM_URL}/v1/chat/completions",
+        f"{OLLAMA_URL}/v1/chat/completions",
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {LITELLM_KEY}",
             "X-Routed-Model": model,
             "X-Route-Reason": reason,
             "X-Route-Key": route_key,
@@ -192,6 +196,6 @@ async def chat_completions(request: Request) -> Response:
         return Response(content=e.read(), status_code=e.code, media_type="application/json")
     except urllib.error.URLError as e:
         return JSONResponse(
-            {"error": f"Cannot reach LiteLLM at {LITELLM_URL}: {e.reason}"},
+            {"error": f"Cannot reach Ollama at {OLLAMA_URL}: {e.reason}"},
             status_code=502,
         )

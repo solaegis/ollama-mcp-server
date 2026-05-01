@@ -68,8 +68,10 @@ const tools: Tool[] = [
   {
     name: 'ollama_git_commit',
     description:
-      'Generate a conventional commit message (feat/fix/chore/refactor/docs/test/perf) ' +
-      'from a git diff. Uses the smart router (model auto → git_commit → qwen2.5-coder-14b). ' +
+      'Generate a commitizen-compatible conventional commit message from a git diff. ' +
+      'Supports feat/fix/chore/refactor/docs/test/perf/style/ci/build/revert types. ' +
+      'Automatically infers scope from changed file paths. Supports optional BREAKING CHANGE ' +
+      'footer and Closes #N issue reference. Uses smart router (git_commit → qwen2.5-coder:14b). ' +
       'Returns only the commit message, ready to use. Get the diff with: git diff --staged',
     inputSchema: {
       type: 'object',
@@ -81,6 +83,21 @@ const tools: Tool[] = [
         context: {
           type: 'string',
           description: 'Optional: brief description of what changed and why.',
+        },
+        scope: {
+          type: 'string',
+          description:
+            'Optional scope hint (e.g. "auth", "router", "api"). ' +
+            'If omitted, scope is inferred from changed file paths in the diff.',
+        },
+        breaking: {
+          type: 'boolean',
+          description: 'Set true for breaking changes. Adds a BREAKING CHANGE: footer.',
+        },
+        issue: {
+          type: 'integer',
+          description: 'GitHub issue number (e.g. 42). Adds "Closes #42" footer.',
+          minimum: 1,
         },
       },
       required: ['diff'],
@@ -229,15 +246,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const params = GitCommitSchema.parse(args);
 
         const contextLine = params.context ? `\nContext: ${params.context}\n` : '';
+        const scopeHint = params.scope
+          ? `\nScope hint: "${params.scope}" — use this as the commit scope.`
+          : '\nInfer scope from changed file paths (e.g. src/auth/ → auth, router/ → router, src/index.ts → server). Omit scope if truly cross-cutting.';
+        const breakingInstructions = params.breaking
+          ? '\nThis is a BREAKING CHANGE. You MUST add a blank line after the subject, then a "BREAKING CHANGE: <description>" footer explaining what breaks and how to migrate.'
+          : '\nIf the diff clearly removes an export, changes a public API signature, or deletes an endpoint, include a BREAKING CHANGE: footer.';
+        const issueFooter = params.issue
+          ? `\nInclude this footer line at the end: "Closes #${params.issue}"`
+          : '';
+
         const prompt =
-          `You are an expert at writing conventional git commit messages.\n` +
-          `Write a single conventional commit message for the following diff.\n` +
-          `Format: <type>(<scope>): <short description>\n\n` +
-          `Types: feat, fix, chore, refactor, docs, test, perf, style, ci\n` +
+          `You are an expert at writing commitizen-compatible conventional git commit messages.\n` +
+          `Write a single conventional commit message for the following diff.\n\n` +
+          `Format:\n` +
+          `  <type>(<scope>): <short description>\n` +
+          `  [blank line]\n` +
+          `  [optional body: bullet points explaining what and why]\n` +
+          `  [blank line]\n` +
+          `  [optional footers: BREAKING CHANGE: ..., Closes #N]\n\n` +
+          `Types: feat, fix, chore, refactor, docs, test, perf, style, ci, build, revert\n\n` +
           `Rules:\n` +
-          `- Subject line: 72 chars max, imperative mood, no period\n` +
-          `- If the change is substantial, add a blank line then bullet-point body\n` +
+          `- Subject: 72 chars max, imperative mood, no period at end\n` +
+          `- Body: add only if non-obvious; bullet points, wrap at 72 chars\n` +
           `- Output ONLY the commit message. No explanation, no markdown fences.\n` +
+          `${scopeHint}\n` +
+          `${breakingInstructions}\n` +
+          `${issueFooter}\n` +
           `${contextLine}\n` +
           `Diff:\n${params.diff}`;
 

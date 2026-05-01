@@ -1,38 +1,30 @@
-"""Ensure classifier target models stay aligned with config/litellm.yaml."""
+"""Ensure classifier model names use Ollama native format (name:tag)."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import yaml
 from router.classifier import ROUTES
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-LITELLM_PATH = REPO_ROOT / "config" / "litellm.yaml"
+KNOWN_OLLAMA_MODELS = {
+    "qwen2.5-coder:14b",
+    "qwen2.5-coder:7b",
+    "gemma4:27b",
+    "gemma4:latest",
+    "llama3.3:70b",
+    "phi4:latest",
+}
 
 
-def test_litellm_yaml_exists() -> None:
-    assert LITELLM_PATH.is_file()
-
-
-def test_classifier_models_are_litellm_aliases() -> None:
-    raw = yaml.safe_load(LITELLM_PATH.read_text())
-    model_names = {entry["model_name"] for entry in raw["model_list"]}
-    for _key, route in ROUTES.items():
-        assert route.model in model_names, (
-            f"Route '{route.key}' targets model_name '{route.model}' "
-            f"which is missing from {LITELLM_PATH}"
+def test_classifier_models_use_ollama_format() -> None:
+    """All route models must use Ollama name:tag format (colon separator)."""
+    for key, r in ROUTES.items():
+        assert ":" in r.model, (
+            f"Route '{key}' model '{r.model}' is not in Ollama format (expected 'name:tag')"
         )
 
 
-def test_litellm_model_list_nonempty() -> None:
-    raw = yaml.safe_load(LITELLM_PATH.read_text())
-    assert len(raw["model_list"]) >= 1
-
-
-def test_litellm_includes_models_for_explicit_client_use() -> None:
-    """deepseek-coder-v2 and phi4 are in LiteLLM but not classifier ROUTES — use by model name."""
-    raw = yaml.safe_load(LITELLM_PATH.read_text())
-    names = {entry["model_name"] for entry in raw["model_list"]}
-    assert "deepseek-coder-v2" in names
-    assert "phi4" in names
+def test_classifier_models_are_known_ollama_models() -> None:
+    """All route models must be in the set of known Ollama models."""
+    for key, r in ROUTES.items():
+        assert r.model in KNOWN_OLLAMA_MODELS, (
+            f"Route '{key}' targets '{r.model}' which is not in the known Ollama model set"
+        )

@@ -139,6 +139,15 @@ export const GitCommitSchema = z.object({
   context: z.string().optional().describe(
     'Optional brief description of what changed and why, to help produce a better commit message.'
   ),
+  scope: z.string().optional().describe(
+    'Optional scope hint (e.g. "auth", "router", "api"). If omitted, scope is inferred from file paths in the diff.'
+  ),
+  breaking: z.boolean().optional().describe(
+    'Set true for breaking changes. Adds a BREAKING CHANGE: footer to the commit message.'
+  ),
+  issue: z.number().int().positive().optional().describe(
+    'GitHub issue number to close (e.g. 42). Adds "Closes #42" footer to the commit message.'
+  ),
 });
 
 export const SummarizeSchema = z.object({

@@ -7,7 +7,6 @@ vars:
   REPO_DIR:
     sh: pwd
   OLLAMA_URL: http://localhost:11434
-  LITELLM_ORB: http://litellm.ollama-stack.orb.local:4000
   ROUTER_ORB: http://ollama-router.ollama-stack.orb.local:4001
 
 tasks:
@@ -41,12 +40,11 @@ tasks:
   # ─── Docker stack ─────────────────────────────────────────────
   up:
     silent: true
-    desc: Start full stack (Ollama + LiteLLM + Router + WebUI + metrics)
+    desc: Start full stack (Ollama + Router + WebUI + metrics)
     cmds:
       - cp -n .env.example .env 2>/dev/null || true
       - "{{.COMPOSE}} up -d --remove-orphans"
       - task: _wait-ollama
-      - task: _wait-litellm
       - task: status
 
   down:
@@ -56,7 +54,7 @@ tasks:
 
   restart:
     silent: true
-    desc: "Restart a service: task restart -- litellm"
+    desc: "Restart a service: task restart -- router"
     cmds: ["{{.COMPOSE}} restart {{.CLI_ARGS}}"]
 
   logs:
@@ -73,14 +71,12 @@ tasks:
         echo ""
         echo "Endpoints (localhost):"
         echo "  Ollama API     -> http://localhost:11434"
-        echo "  LiteLLM API    -> http://localhost:4000"
         echo "  Smart Router   -> http://localhost:4001"
         echo "  Chat UI        -> http://localhost:8080"
         echo "  Grafana        -> http://localhost:3001  (login: admin / admin)"
         echo "  Prometheus     -> http://localhost:9090"
         echo ""
         echo "Endpoints (OrbStack — use these in Cursor/IDE to avoid SSRF blocks):"
-        echo "  LiteLLM API    -> {{.LITELLM_ORB}}/v1"
         echo "  Smart Router   -> {{.ROUTER_ORB}}/v1"
 
   grafana:
@@ -101,9 +97,9 @@ tasks:
     desc: Verify OrbStack hostnames and container status
     cmds:
       - |
-        echo "=== LiteLLM ==="
-        if curl -sf --max-time 3 {{.LITELLM_ORB}}/health/liveliness >/dev/null 2>&1; then
-          echo "OK  -> {{.LITELLM_ORB}}/v1  (configured in Cursor)"
+        echo "=== Ollama ==="
+        if curl -sf --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
+          echo "OK  -> http://localhost:11434"
         else
           echo "FAIL -> run: task up"
         fi
@@ -240,8 +236,7 @@ tasks:
     cmds:
       - uv sync --group dev
       - |
-        LITELLM_BASE_URL=http://localhost:4000 \
-        LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-dev-key} \
+        OLLAMA_BASE_URL=http://localhost:11434 \
         uv run uvicorn router.server:app --port 4001 --reload
 
   # ─── VS Code extension ────────────────────────────────────────
@@ -296,12 +291,6 @@ tasks:
     cmds:
       - task: list
 
-  test-litellm:
-    silent: true
-    desc: Smoke-test LiteLLM OpenAI-compatible endpoint
-    cmds:
-      - python3 scripts/test_litellm.py
-
   # ─── Setup helpers ────────────────────────────────────────────
   setup-cursor:
     silent: true
@@ -334,6 +323,20 @@ tasks:
     desc: Write ~/.cursor/ollama-router-model-list.json and probe GET /v1/models (Cursor discovers models via API)
     cmds:
       - uv run python scripts/sync_cursor_models.py
+
+  setup-claude-code:
+    silent: true
+    desc: Register MCP server with Claude Code (user scope — available in all projects)
+    deps: [build]
+    cmds:
+      - |
+        claude mcp add ollama \
+          --scope user \
+          -e OLLAMA_BASE_URL=http://localhost:11434 \
+          -e ROUTER_BASE_URL=http://localhost:4001 \
+          -- node {{.REPO_DIR}}/dist/index.js
+        echo "Registered: claude mcp add ollama (user scope)"
+        echo "Verify with: claude mcp list"
 
   setup-claude-desktop:
     silent: true
@@ -374,20 +377,3 @@ tasks:
         echo "ERROR: Ollama did not become ready after 90s"
         docker logs ollama --tail 20
         exit 1
-
-  _wait-litellm:
-    silent: true
-    internal: true
-    cmds:
-      - |
-        echo "Waiting for LiteLLM (can take 2-3 min on first start)..."
-        for i in $(seq 1 60); do
-          if curl -sf http://localhost:4000/health/liveliness >/dev/null 2>&1; then
-            echo "LiteLLM ready"
-            exit 0
-          fi
-          echo "  attempt $i/60..."
-          sleep 5
-        done
-        echo "WARNING: LiteLLM not ready after 5 min — check logs with: task logs -- litellm"
-        exit 0
