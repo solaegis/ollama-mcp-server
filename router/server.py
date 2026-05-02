@@ -16,7 +16,7 @@ run for non-streaming ``application/json`` responses (see _record_chat_metrics).
 
 Endpoints:
   POST /v1/chat/completions   OpenAI-compatible. Auto-routes then proxies to Ollama.
-  GET  /v1/models             Synthetic OpenAI model list (used by Cursor discovery).
+  GET  /v1/models             Synthetic OpenAI model list (shortcuts, Cursor classifier aliases, ROUTES).
   POST /route                 Classification only — returns model + reason, no LLM call.
   GET  /health                Health check.
   GET  /metrics               Prometheus metrics for the router process.
@@ -48,6 +48,22 @@ OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # Force git-commit model without classifier.
 FORCE_COMMIT_MODEL_IDS = frozenset({"commit", "commit-sage", "git-commit"})
+
+# Cursor's model picker often rejects bare ``router`` / ``auto`` with "Model name is not valid"
+# even though GET /v1/models lists them. These OpenAI-shaped IDs map to the classifier only —
+# they must never be forwarded verbatim to Ollama (not real cloud models).
+# Include OpenAI-shaped IDs Cursor's picker often accepts; they never leave this router as-is.
+CURSOR_CLASSIFIER_ALIASES = frozenset(
+    {
+        "gpt-4o-mini-local",
+        "gpt-4o-local",
+        "gpt-4o-mini",
+        "gpt-4o",
+        "gpt-3.5-turbo",
+    }
+)
+
+CLASSIFIER_REQUEST_MODELS = frozenset({"auto", "router", ""}) | CURSOR_CLASSIFIER_ALIASES
 
 app = FastAPI(title="Ollama Smart Router", version="1.0.0")
 
@@ -93,6 +109,9 @@ def openai_models_list() -> JSONResponse:
     Cursor and other OpenAI-compatible clients call GET /v1/models to discover
     available model IDs. We build this list from ROUTES (Ollama native names)
     and router shortcuts — no outbound HTTP call needed.
+
+    CURSOR_CLASSIFIER_ALIASES are advertised for clients whose UI rejects ``router`` /
+    ``auto`` but accepts OpenAI-like names; they trigger the same classifier path.
     """
     seen: set[str] = set()
     model_ids: list[str] = []
@@ -101,6 +120,11 @@ def openai_models_list() -> JSONResponse:
         if shortcut not in seen:
             seen.add(shortcut)
             model_ids.append(shortcut)
+
+    for alias in sorted(CURSOR_CLASSIFIER_ALIASES):
+        if alias not in seen:
+            seen.add(alias)
+            model_ids.append(alias)
 
     for r in ROUTES.values():
         if r.model not in seen:
@@ -146,7 +170,8 @@ async def chat_completions(request: Request) -> Response:
     """
     OpenAI-compatible endpoint with automatic model routing.
 
-    If the client sends model="auto", the router picks the model.
+    If the client sends model="auto", "router", or a CURSOR_CLASSIFIER_ALIASES id,
+    the router picks the model via the classifier.
     Models "commit", "commit-sage", "git-commit" force the git_commit model.
     Any other explicit ``model`` string is forwarded to Ollama unchanged (must be
     a valid Ollama model id, e.g. ``phi4:latest``). This stack does not map
@@ -163,7 +188,7 @@ async def chat_completions(request: Request) -> Response:
         reason = gc.reason
         route_key = gc.key
         routed = True
-    elif requested_model in ("auto", "router", ""):
+    elif requested_model in CLASSIFIER_REQUEST_MODELS:
         model, reason, route_key = route(messages)
         body["model"] = model
         routed = True

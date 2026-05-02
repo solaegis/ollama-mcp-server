@@ -70,6 +70,10 @@ def main() -> None:
     print("Cursor: Settings → Models → OpenAI → Override base URL →", router_url)
     print("        API key:", bearer, "(placeholder; router does not validate)")
     print("        Click Verify. Models come from GET /v1/models.")
+    print(
+        "        Smart routing in Cursor: prefer gpt-4o-mini or gpt-4o "
+        "(router/auto often rejected); enable OpenAI API Key + placeholder."
+    )
 
 
 if __name__ == "__main__":

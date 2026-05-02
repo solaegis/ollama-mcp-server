@@ -84,7 +84,7 @@ Cursor and other clients can use **several** “agents” or backends at once. U
 |---|---|
 | **Cursor cloud / subscription models** (default Chat, Composer, etc.) | Hard problems: architecture, large refactors, debugging across many files, planning, or when you need the strongest available model. |
 | **MCP tools** (`ollama_task`, `ollama_summarize`, `ollama_git`, …) | Offload **repetitive or token-heavy** work to **local** models: conventional commits from diffs, long summaries, embeddings, quick local checks. Saves **context and cost** on the cloud agent; the **smart router** picks a model from prompt content when the tool uses `model: auto`. Prefer these tools in the **agent** chat when the task does not need frontier reasoning. |
-| **OpenAI-compatible override → smart router** (`http://localhost:4001/v1`, model `auto` or an Ollama model id) | **Local** Chat sessions that follow the same **routing** as MCP (code vs docs vs summarization, etc.). Use **Verify** so `GET /v1/models` populates the list. Not every Composer surface respects custom providers—if in doubt, use **Chat** or **MCP** for local routing. |
+| **OpenAI-compatible override → smart router** (`http://localhost:4001/v1`, model **`gpt-4o-mini`** / **`gpt-4o`** for classifier routing — or **`gpt-4o-mini-local`** / an Ollama model id) | **Local** Chat sessions that follow the same **routing** as MCP (code vs docs vs summarization, etc.). Cursor may reject **`router`** / **`auto`** in the picker — use **`gpt-4o-mini`** (see [Cursor](#cursor)). Enable **OpenAI API Key** with a placeholder. Use **Verify** so `GET /v1/models` populates the list. Not every Composer surface respects custom providers—if in doubt, use **Chat** or **MCP** for local routing. |
 | **VS Code / Cursor extension** (`Ollama: …` commands) | **Editor-native** flows: send selection, rewrite selection, side chat panel, model picker. Calls **Ollama directly** by default; optional **router** URL in settings for OpenAI-style calls via the smart router. |
 
 **Practical split:** keep **cloud** for the work only a strong model should do; push **commits, summaries, and bulk local inference** to MCP or the local router so your main agent’s context stays focused on coding and design.
@@ -107,7 +107,7 @@ Ollama’s compatibility layer does not support everything OpenAI’s API accept
 
 **This repo’s smart router (`router/server.py`)**
 
-- **`GET /v1/models`** is a **synthetic** list (shortcuts like `auto`, `commit`, and each model from the routing table). It does **not** call Ollama’s `GET /v1/models`. For **ground truth** on what is pulled, use `ollama list`, Open WebUI, or `curl http://localhost:11434/api/tags`. For extra local names, use Ollama’s **`ollama cp`** ([OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)).
+- **`GET /v1/models`** is a **synthetic** list (shortcuts like `auto`, `router`, `commit`, **Cursor classifier aliases** including `gpt-4o-mini`, `gpt-4o`, `gpt-3.5-turbo`, `gpt-4o-mini-local`, `gpt-4o-local`, and each model from the routing table). It does **not** call Ollama’s `GET /v1/models`. For **ground truth** on what is pulled, use `ollama list`, Open WebUI, or `curl http://localhost:11434/api/tags`. For extra local names, use Ollama’s **`ollama cp`** ([OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)).
 - **Classification** is fast keyword/heuristic routing in [`router/classifier.py`](router/classifier.py). A **wrong route** sends the request to a suboptimal model (quality/latency), not only a slow path. Use **`POST /route`** on the router (same host/port as chat) with `{"messages":[...]}` to inspect `model`, `reason`, and `route_key` without running the LLM.
 - **Streaming:** the router forwards the full upstream response after Ollama completes the HTTP response (`urlopen` + `read()`). Clients that set **`stream: true`** still get a valid SSE body, but **first-byte latency** is not the same as talking to Ollama directly chunk-by-chunk. **`stream_options` / `include_usage`** are passed through in the JSON body to Ollama; router **Prometheus token counters** (from `usage`) only increment on **non-streaming** `application/json` responses — streaming clients often omit `usage` unless they request it per upstream docs.
 - **Security / ops:** **`OLLAMA_BASE_URL`** for the router is **server-side only** (Docker env / compose). Point it at a **single trusted** Ollama instance; do not expose a user-controlled upstream URL through this proxy. **`GET /metrics`** serves Prometheus text without auth — keep the router on **localhost** or put it behind a reverse proxy if the port is reachable from untrusted networks.
@@ -185,13 +185,37 @@ Official sizes on [ollama.com/library/deepseek-coder](https://ollama.com/library
 
 For the **OpenAI-compatible provider** (Cursor chat/composer using local models), point at the **smart router** (port **4001**) so requests can be classified (code vs docs vs **git commit**, etc.):
 
-Cursor Settings → Models → OpenAI override (or `cursor.openai.apiBase` / `cursor.openai.apiKey` in `settings.json`):
-- API Base: `http://localhost:4001/v1` (or `http://router.ollama-stack.orb.local:4001/v1` from `task setup-cursor` / `task status` — OrbStack DNS for the `router` service; avoids Cursor SSRF blocks on localhost). The router serves **`GET /v1/models`** from its routing table so Cursor can **discover** model IDs (use **Verify** if the list is empty).
-- API Key: any non-empty string (e.g. `sk-local-dev-key`) — placeholder Bearer token; the router does not validate it.
-- Model: `auto` or `router` for automatic routing; or `commit` / `commit-sage` to force the git-commit model; or any Ollama model id the router exposes (e.g. `qwen2.5-coder:7b`) for a fixed model.
-- `task sync-cursor-models` writes `~/.cursor/ollama-router-model-list.json` from live `GET /v1/models`; it does **not** populate Cursor’s Settings UI (Cursor reads models from the API, not arbitrary `settings.json` keys).
+**Setup**
 
-**Commit Sage** (VS Code / Cursor extension `VizzleTF.geminicommit`): set provider to **OpenAI-compatible**, **Base URL** `http://localhost:4001/v1`, API key as above, and set the model to **`commit`** or **`commit-sage`** so diffs always use the git-commit route model, or **`auto`** / **`router`** for classifier routing. This router does not accept cloud vendor model ids; use Ollama names (from **`GET /v1/models`** or `ollama list`) for a fixed model.
+1. Run the router (e.g. `task router-up` or `task up`).
+2. Cursor Settings → Models → OpenAI override (or `cursor.openai.apiBase` / `cursor.openai.apiKey` in `settings.json`):
+   - **API Base:** `http://localhost:4001/v1` (or `http://router.ollama-stack.orb.local:4001/v1` from `task setup-cursor` / `task status` — OrbStack DNS for the `router` service; avoids Cursor SSRF blocks on localhost).
+   - **OpenAI API Key:** turn this **ON** and enter **`sk-local-dev-key`** (or any non-empty placeholder). Cursor’s OpenAI integration often **will not treat the custom provider as usable** when the key toggle is off or the field is empty — your router **does not validate** the key; the value is only for Cursor’s client.
+3. Click **Verify** so Cursor calls **`GET /v1/models`** and discovers model IDs.
+
+**If you still see “Model name is not valid” (common when quota is exhausted)**
+
+- Do not rely on `router` or `auto` in the picker — Cursor often rejects them even if you added them manually.
+- Add and select a model id Cursor already whitelists for OpenAI-shaped names, which this router maps to **classifier routing** (not real OpenAI): **`gpt-4o-mini`** or **`gpt-4o`** or **`gpt-3.5-turbo`**, or the explicit local-only names **`gpt-4o-mini-local`** / **`gpt-4o-local`**. Remove the custom **`router`** entry if it keeps erroring.
+- After changing the router image or `router/server.py`, restart the router and click **Verify** again.
+
+**Running out of Cursor subscription credits**
+
+- Chat/Composer **may still gate features** on Cursor’s subscription; if the UI blocks you entirely, use **Agent with MCP** (`ollama_task`, etc.) against **`ROUTER_BASE_URL`**, which does not use the OpenAI model dropdown.
+
+**Model selection (important for Cursor)**
+
+- Cursor applies **client-side validation** on model names. It may show **“Model name is not valid”** for **`router`** or **`auto`** even though the router lists them — this is a Cursor limitation, not the router.
+- Prefer **`gpt-4o-mini`** or **`gpt-4o`** (or **`gpt-4o-mini-local`** / **`gpt-4o-local`**) for **smart routing** (classifier). With the override base URL pointing at **this router**, those ids are **local shortcuts only** — the router **never** forwards them verbatim to Ollama and does **not** call OpenAI’s API.
+- Alternatives: **`commit`** / **`commit-sage`** / **`git-commit`** for the git-commit route; any **Ollama** id from **`GET /v1/models`** (e.g. **`phi4:latest`**) for a **fixed** model (**no** classifier).
+- If **Add custom model** fails, try submitting with **Enter** (some Cursor builds behave differently than the Add button).
+- **`task sync-cursor-models`** writes `~/.cursor/ollama-router-model-list.json` from live **`GET /v1/models`** for reference only — Cursor still reads models from the API when you **Verify**.
+
+**MCP (most reliable classifier routing)**
+
+For workloads where the OpenAI override picker keeps blocking shortcuts, use MCP with **`ROUTER_BASE_URL`** (see `~/.cursor/mcp.json` above). Tools such as **`ollama_task`** use **`model: auto`** and hit the router **without** Cursor’s model-name gate.
+
+**Commit Sage** (VS Code / Cursor extension `VizzleTF.geminicommit`): set provider to **OpenAI-compatible**, **Base URL** `http://localhost:4001/v1`, API key placeholder as above. Use **`commit`** or **`commit-sage`** so diffs always use the git-commit route model; **`gpt-4o-mini`** / **`gpt-4o`** / **`gpt-4o-mini-local`** / **`gpt-4o-local`** / **`auto`** / **`router`** for classifier routing when Cursor accepts the id. For a fixed Ollama model without classification, use names from **`GET /v1/models`** or `ollama list`.
 
 ### Windsurf
 

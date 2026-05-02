@@ -43,6 +43,10 @@ def test_v1_models_returns_synthetic_list() -> None:
     assert len(body["data"]) > 0
     ids = {m["id"] for m in body["data"]}
     assert "auto" in ids
+    assert "gpt-4o-mini-local" in ids
+    assert "gpt-4o-local" in ids
+    assert "gpt-4o-mini" in ids
+    assert "gpt-4o" in ids
     assert "qwen2.5-coder:14b" in ids
 
 
@@ -101,6 +105,61 @@ def test_chat_completions_auto_forwards_to_ollama(mock_urlopen: MagicMock) -> No
     assert "router_chat_completions_total{" in text
     assert "router_chat_completion_prompt_tokens_total{" in text
     assert "router_chat_completion_completion_tokens_total{" in text
+
+
+@patch("router.server.urllib.request.urlopen")
+def test_chat_completions_cursor_alias_classifies(mock_urlopen: MagicMock) -> None:
+    """gpt-4o-mini-local is a Cursor-friendly alias for the classifier path."""
+    mock_urlopen.return_value = _mock_urlopen_response(
+        {
+            "id": "chatcmpl-test",
+            "model": "qwen2.5-coder:7b",
+            "choices": [
+                {"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"},
+            ],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+        }
+    )
+    r = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-4o-mini-local",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+    assert r.status_code == 200
+    mock_urlopen.assert_called_once()
+    call_args = mock_urlopen.call_args[0][0]
+    sent = json.loads(call_args.data.decode())
+    assert sent["model"] != "gpt-4o-mini-local"
+    assert sent["model"] != "gpt-4o-local"
+
+
+@patch("router.server.urllib.request.urlopen")
+def test_chat_completions_openai_named_alias_classifies(mock_urlopen: MagicMock) -> None:
+    """gpt-4o-mini routes through classifier (Cursor-shaped id)."""
+    mock_urlopen.return_value = _mock_urlopen_response(
+        {
+            "id": "chatcmpl-test",
+            "model": "phi4:latest",
+            "choices": [
+                {"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"},
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+    r = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "Summarize this release in two bullets."}],
+        },
+    )
+    assert r.status_code == 200
+    mock_urlopen.assert_called_once()
+    call_args = mock_urlopen.call_args[0][0]
+    sent = json.loads(call_args.data.decode())
+    assert sent["model"] != "gpt-4o-mini"
 
 
 @patch("router.server.urllib.request.urlopen")
