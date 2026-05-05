@@ -113,6 +113,26 @@ services:
         echo "Model pull complete"
 
   # ─── Metrics ──────────────────────────────────────────────────
+  metrics:
+    image: python:3.12-slim
+    container_name: ollama-metrics
+    restart: unless-stopped
+    networks: [ollama-net]
+    ports:
+      - "9110:9110"
+    volumes:
+      - ../scripts:/app/scripts:ro
+      - ../pyproject.toml:/app/pyproject.toml:ro
+      - ../uv.lock:/app/uv.lock:ro
+    working_dir: /app
+    command: >
+      sh -c "pip install -q uv &&
+             uv sync --frozen --no-dev &&
+             uv run python scripts/ollama_metrics_exporter.py"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - METRICS_PORT=9110
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus

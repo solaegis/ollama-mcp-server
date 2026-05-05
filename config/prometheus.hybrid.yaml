@@ -9,7 +9,7 @@ scrape_configs:
   # Native Ollama on the Docker host (Mac Metal) — see docker/compose.hybrid-host.yaml
   - job_name: ollama
     static_configs:
-      - targets: ["host.docker.internal:11434"]
+      - targets: ["host.docker.internal:9110"]
     metrics_path: /metrics
     scrape_timeout: 10s
 

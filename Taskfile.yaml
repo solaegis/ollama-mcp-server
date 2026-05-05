@@ -99,6 +99,7 @@ tasks:
         echo ""
         echo "Endpoints (localhost):"
         echo "  Ollama API     -> http://localhost:11434 (native on host)"
+        echo "  Metrics Exp.   -> http://localhost:9110/metrics"
         echo "  Smart Router   -> http://localhost:4001"
         echo "  Chat UI        -> http://localhost:8080"
         echo "  Grafana        -> http://localhost:3001  (login: admin / admin)"
@@ -306,6 +307,12 @@ tasks:
       - |
         OLLAMA_BASE_URL=http://localhost:11434 \
         uv run uvicorn router.server:app --port 4001 --reload
+
+  metrics-exporter:
+    desc: Run the Ollama metrics exporter locally (outside Docker)
+    cmds:
+      - uv sync
+      - uv run python scripts/ollama_metrics_exporter.py
 
   # ─── VS Code extension ────────────────────────────────────────
   ext-install:
