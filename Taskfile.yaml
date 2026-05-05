@@ -190,6 +190,40 @@ tasks:
           | uniq
         echo "Done: $MODEL"
 
+  warm:
+    desc: "Preload models into RAM with 24h keep-alive. Usage: task warm -- model1 model2 ... (falls back to DEFAULT_MODELS if empty)"
+    cmds:
+      - |
+        MODELS="{{.CLI_ARGS}}"
+        if [ -z "$MODELS" ]; then
+          if [ ! -f .env ]; then echo "No .env found and no models provided"; exit 1; fi
+          MODELS=$(grep "^DEFAULT_MODELS=" .env | cut -d'=' -f2 | tr ',' ' ')
+        fi
+        if [ -z "$MODELS" ]; then echo "No models provided and no DEFAULT_MODELS found"; exit 1; fi
+        
+        # Get list of pulled models to avoid warming non-existent ones
+        PULLED=$(curl -sf {{.OLLAMA_URL}}/api/tags | python3 -c "import sys, json; print(' '.join(m['name'] for m in json.load(sys.stdin).get('models', [])))" 2>/dev/null)
+        
+        for m in $MODELS; do
+          # Check if model is pulled
+          if [[ ! " $PULLED " =~ " $m " ]]; then
+            echo "Skipping $m (not found). Pull it first: task pull -- $m"
+            continue
+          fi
+
+          echo "Warming $m..."
+          # Use a longer timeout for large models and don't fail the whole loop if one model errors
+          STATUS=$(printf '{"model": "%s", "prompt": "warm", "keep_alive": "24h", "stream": false}' "$m" \
+            | curl -s -w "%{http_code}" -X POST {{.OLLAMA_URL}}/api/generate -H "Content-Type: application/json" -d @- -o /dev/null)
+          
+          if [ "$STATUS" -eq 200 ]; then
+            echo "  OK: $m is ready."
+          else
+            echo "  ERROR: Failed to warm $m (HTTP $STATUS)"
+          fi
+        done
+        echo "Warm-up process complete."
+
   list:
     desc: List all locally available models
     cmds:
@@ -366,6 +400,27 @@ tasks:
         cfg_path.write_text(json.dumps(cfg, indent=2))
         print('Written:', cfg_path)
         print('Restart Claude Desktop to pick up changes.')
+        "
+
+  setup-antigravity:
+    desc: Write MCP config to Antigravity config
+    cmds:
+      - |
+        python3 -c "
+        import json, pathlib
+        dist = '{{.REPO_DIR}}/dist/index.js'
+        cfg_path = pathlib.Path('/Users/lvavasour/.gemini/antigravity/mcp_config.json')
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+        cfg.setdefault('mcpServers', {})['ollama'] = {
+          'command': 'node',
+          'args': [dist],
+          'env': {
+            'OLLAMA_BASE_URL': 'http://localhost:11434',
+            'ROUTER_BASE_URL': 'http://localhost:4001',
+          },
+        }
+        cfg_path.write_text(json.dumps(cfg, indent=2))
+        print('Written:', cfg_path)
         "
 
   # ─── Internal ─────────────────────────────────────────────────

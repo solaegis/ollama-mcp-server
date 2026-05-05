@@ -48,18 +48,18 @@ ROUTES: dict[str, Route] = {
     ),
     "rust_code": Route(
         "rust_code",
-        "qwen2.5-coder:14b",
-        "Rust implementation task",
+        "qwen2.5-coder:32b",
+        "Rust implementation task (high precision)",
     ),
     "general_code": Route(
         "general_code",
-        "qwen2.5-coder:7b",
+        "qwen2.5-coder:14b",
         "General code task",
     ),
     "architecture": Route(
         "architecture",
-        "deepseek-coder:33b",
-        "Architecture/design reasoning",
+        "llama3.3:70b",
+        "Architecture/design reasoning (frontier local)",
     ),
     "docs_writing": Route(
         "docs_writing",
@@ -73,7 +73,7 @@ ROUTES: dict[str, Route] = {
     ),
     "default": Route(
         "default",
-        "qwen2.5-coder:7b",
+        "qwen2.5-coder:14b",
         "Default fallback",
     ),
 }
